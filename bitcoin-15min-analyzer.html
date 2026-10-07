@@ -140,8 +140,8 @@ a { color: var(--accent); }
   <section class="card">
     <h2>Kans op UP — drie invalshoeken</h2>
     <div class="row"><span>Statistisch<span class="sub">afstand tot open ÷ verwachte beweging</span></span><span class="pbar"><i id="bStat"></i></span><span id="pStat" class="val mono">–</span></div>
-    <div class="row"><span>Met signalen<span class="sub">+ order flow, orderboek, momentum</span></span><span class="pbar"><i id="bSig"></i></span><span id="pSig" class="val mono">–</span></div>
-    <div class="row"><span>Historisch vergelijkbaar<span id="analogSub" class="sub">laatste 7 dagen laden…</span></span><span class="pbar"><i id="bHist"></i></span><span id="pHist" class="val mono">–</span></div>
+    <div class="row"><span>Met signalen<span id="sigSub" class="sub">+ order flow, orderboek, momentum</span></span><span class="pbar"><i id="bSig"></i></span><span id="pSig" class="val mono">–</span></div>
+    <div class="row"><span>Historisch vergelijkbaar<span id="analogSub" class="sub">laatste 21 dagen laden…</span></span><span class="pbar"><i id="bHist"></i></span><span id="pHist" class="val mono">–</span></div>
     <p class="small muted" style="margin:10px 0 0">De bovenste balk op de pagina gebruikt <b>Met signalen</b>. Als de drie ver uit elkaar liggen: voorzichtig.</p>
   </section>
 
@@ -183,12 +183,24 @@ a { color: var(--accent); }
 
   <!-- Volgend venster -->
   <section class="card">
-    <h2>Volgend venster</h2>
+    <h2>Voorspelling vooraf — volgend venster</h2>
     <div id="nextLabel" class="big mono">–</div>
     <div id="nextStart" class="small muted"></div>
-    <div class="row" style="margin-top:8px"><span>Inschatting UP<span class="sub">alleen signalen; open is nog onbekend</span></span><span class="pbar"><i id="bNext"></i></span><span id="pNext" class="val mono">–</span></div>
-    <div class="row"><span>Basisfrequentie UP<span class="sub">alle vensters laatste 7 dagen</span></span><span class="pbar"><i id="bBase"></i></span><span id="pBase" class="val mono">–</span></div>
-    <p class="small muted" style="margin:10px 0 0">Vóór de start is het vrijwel altijd ~50/50. De echte informatie komt pas tijdens het venster.</p>
+    <div class="row" style="margin-top:8px"><span>Kans op UP<span id="nextSub" class="sub">model wordt getraind…</span></span><span class="pbar"><i id="bNext"></i></span><span id="pNext" class="val mono">–</span></div>
+    <div class="row"><span>Basisfrequentie UP<span class="sub">alle vensters laatste 21 dagen</span></span><span class="pbar"><i id="bBase"></i></span><span id="pBase" class="val mono">–</span></div>
+    <div class="label" style="margin-top:10px">Waarom? (wat duwt de voorspelling omhoog of omlaag)</div>
+    <div id="nextWhy"></div>
+    <div id="nextVerdict" class="edge small">–</div>
+  </section>
+
+  <!-- Geleerd model -->
+  <section class="card">
+    <h2>Geleerd model — hoe goed is het echt?</h2>
+    <div id="modelSum" class="small muted">Wacht op historie…</div>
+    <div class="tablewrap"><table><thead><tr><th></th><th>goed</th><th>Brier</th><th>gokken</th><th>n</th></tr></thead><tbody id="modelVal"></tbody></table></div>
+    <div class="label" style="margin-top:10px">Wat het model geleerd heeft (vooraf-model, + = wijst naar UP)</div>
+    <div id="modelW"></div>
+    <p class="small muted" style="margin:10px 0 0">Getest op de laatste 30% van de historie die het model níet heeft gezien. "Goed" boven ~52% en een Brier onder die van "gokken" betekent dat er iets te halen valt; anders is het ruis. Het orderboek zit er niet in (daar bestaat geen historie van).</p>
   </section>
 
   <!-- Recente vensters -->
@@ -200,14 +212,14 @@ a { color: var(--accent); }
   <!-- Track record -->
   <section class="card">
     <h2>Eigen track record (in deze browser)</h2>
-    <div id="trackSum" class="small muted">Wordt opgebouwd zolang deze pagina open staat: de kans na 1, 5 en 10 minuten wordt bewaard en na afloop vergeleken met de uitslag.</div>
-    <div class="tablewrap"><table><thead><tr><th>Venster</th><th>na 1m</th><th>na 5m</th><th>na 10m</th><th>Uitslag</th></tr></thead><tbody id="track"></tbody></table></div>
+    <div id="trackSum" class="small muted">Wordt opgebouwd zolang deze pagina open staat: de voorspelling vooraf en de kans na 1, 5 en 10 minuten worden bewaard en na afloop vergeleken met de uitslag.</div>
+    <div class="tablewrap"><table><thead><tr><th>Venster</th><th>vooraf</th><th>na 1m</th><th>na 5m</th><th>na 10m</th><th>Uitslag</th></tr></thead><tbody id="track"></tbody></table></div>
     <div class="inline"><button id="trackClear">Track record wissen</button></div>
   </section>
 
   <!-- Modelcheck -->
   <section class="card">
-    <h2>Modelcheck (laatste 7 dagen)</h2>
+    <h2>Modelcheck (laatste 21 dagen)</h2>
     <div id="calibSum" class="small muted">Historie laden…</div>
     <div class="tablewrap"><table><thead><tr><th>Model zei</th><th>gem.</th><th>werkelijk UP</th><th>n</th></tr></thead><tbody id="calib"></tbody></table></div>
     <div class="label" style="margin-top:10px">Trefkans van de statistische kans per minuut in het venster</div>
@@ -222,7 +234,8 @@ a { color: var(--accent); }
       <li><strong>Prijsbron:</strong> Polymarket gebruikt de Chainlink BTC/USD-feed, deze pagina gebruikt Binance BTC/USDT. Die verschillen meestal een paar tot tientallen dollars. Staat de prijs vlak bij de open, dan kan dat verschil de uitslag bepalen — vul dan de echte price to beat van Polymarket in.</li>
       <li><strong>Statistische kans:</strong> hoe ver de prijs nu boven/onder de open staat, gedeeld door hoeveel BTC normaal beweegt in de resterende tijd (volatiliteit uit de laatste uren). Hoe minder tijd over, hoe zekerder.</li>
       <li><strong>Signalen:</strong> order flow (wie koopt/verkoopt agressief), het orderboek, momentum, trend en RSI schuiven de kans een beetje op (maximaal ±10 procentpunt rond 50%). Dit zijn vuistregels, geen bewezen voorspellers — het orderboek kan bijvoorbeeld nep-orders (spoofing) bevatten.</li>
-      <li><strong>Historisch vergelijkbaar:</strong> in de afgelopen 7 dagen, hoe vaak eindigde een venster UP als de prijs op hetzelfde moment ongeveer even ver van de open stond.</li>
+      <li><strong>Geleerd model:</strong> de pagina downloadt 21 dagen aan 1-minuut-data en leert daaruit zelf hoeveel momentum, order flow (5/15/60 min), RSI, trend, VWAP en volume echt zeggen over de uitkomst — zowel vooraf als tijdens het venster. Het wordt getest op data die het niet gezien heeft, en elk uur opnieuw getraind. Is het in die test niet beter dan gokken, dan zegt de pagina dat eerlijk.</li>
+      <li><strong>Historisch vergelijkbaar:</strong> in de afgelopen 21 dagen, hoe vaak eindigde een venster UP als de prijs op hetzelfde moment ongeveer even ver van de open stond.</li>
       <li><strong>Modelcheck &amp; track record:</strong> laten zien hoe goed de kansen in het verleden klopten. Vertrouw de tool pas als die cijfers er goed uitzien.</li>
     </ul>
     <p><strong>Eerlijk gezegd:</strong> aan het begin van een venster is BTC vrijwel een muntworp; niemand voorspelt dat betrouwbaar. Een voordeel ontstaat hooguit als de prijs op Polymarket afwijkt van de werkelijke kans — en spread en fees eten een deel daarvan op. Gebruik dit als hulpmiddel, niet als garantie, en zet nooit meer in dan je kunt missen.</p>
@@ -246,10 +259,10 @@ const SIGMA_FLOOR = 0.0002;    // minimaal 0,02% per minuut
 const SIGNAL_K = 0.25;         // max. verschuiving (in σ) door signalen
 const NEXT_K = 0.12;           // signalen voorspellen het volgende venster nog minder
 const BIG_TRADE_USD = 100000;
-const HIST_DAYS = 7;
+const HIST_DAYS = 21;
 const NEAR_OPEN_USD = 25;      // binnen deze afstand kan Binance vs. Chainlink de uitslag bepalen
 const TR_KEY = 'btc15.trackrecord.v1';
-const CHECKPOINTS = [1, 5, 10];
+const CHECKPOINTS = [0, 1, 5, 10];   // 0 = voorspelling vooraf
 const WEIGHTS = { flow1: 0.25, flow5: 0.20, book: 0.15, mom: 0.20, trend: 0.10, rsi: 0.10 };
 
 // ---------- Status ----------
@@ -540,7 +553,7 @@ async function watchdog() {
   }
 }
 
-// ---------- Historie (7 dagen) voor "vergelijkbaar" en modelcheck ----------
+// ---------- Historie (21 dagen) voor "vergelijkbaar" en modelcheck ----------
 async function loadHistory() {
   const need = HIST_DAYS * 24 * 60;
   const all = [];
@@ -558,6 +571,7 @@ async function loadHistory() {
     S.hist.loading = false;
     rebuildSamples();
     renderCalib();
+    retrain();
   } catch (e) {
     S.hist.loading = false;
     S.hist.error = e.message;
@@ -572,17 +586,23 @@ function appendHist(c) {
 }
 
 // Voor elk venster en elke minuut: z-score op dat moment + of het venster UP eindigde.
-function rebuildSamples() {
-  const c = S.hist.candles;
-  if (c.length < 200) return;
+// σ per candle (EWMA van 1-min log-rendementen), null tijdens de opwarmperiode
+function sigmaSeries(c) {
   const sig = new Array(c.length).fill(null);
-  let v = null;
+  let v = 0;
   for (let i = 1; i < c.length; i++) {
     const r = Math.log(c[i].c / c[i - 1].c);
-    if (i <= 30) { v = (v || 0) + r * r / 30; continue; }
+    if (i <= 30) { v += r * r / 30; continue; }
     v = EWMA_LAMBDA * v + (1 - EWMA_LAMBDA) * r * r;
     sig[i] = Math.max(Math.sqrt(v), SIGMA_FLOOR);
   }
+  return sig;
+}
+
+function rebuildSamples() {
+  const c = S.hist.candles;
+  if (c.length < 200) return;
+  const sig = sigmaSeries(c);
   const samples = [];
   for (let i = 120; i + 14 < c.length; i++) {
     if (c[i].t % WIN !== 0) continue;
@@ -596,6 +616,149 @@ function rebuildSamples() {
     }
   }
   S.hist.samples = samples;
+}
+
+// ---------- Leermodel ----------
+// Kenmerken die de chart en de order flow beschrijven, berekend met candles t/m index j.
+// Precies dezelfde functie wordt gebruikt voor training (historie) en live voorspellen.
+const PRE_FEATS = ['mom5', 'mom15', 'mom60', 'flow5', 'flow15', 'flow60', 'rsi', 'trend', 'vwap60', 'volx'];
+const IN_FEATS = ['z', 'flow1', 'flow5', 'mom5', 'trend', 'rsi'];
+const FEAT_NAMES = {
+  z: 'Afstand tot open', mom5: 'Momentum 5 min', mom15: 'Momentum 15 min', mom60: 'Momentum 60 min',
+  flow1: 'Order flow 1 min', flow5: 'Order flow 5 min', flow15: 'Order flow 15 min', flow60: 'Order flow 60 min',
+  rsi: 'RSI', trend: 'Trend EMA 9/21', vwap60: 'Prijs vs. VWAP 60 min', volx: 'Volume vs. normaal',
+};
+const FEAT_LOOKBACK = 240;
+const clampF = x => clamp(x, -4, 4);
+
+function featsAt(c, sig, j) {
+  const s = sig[j];
+  if (!s || j < FEAT_LOOKBACK) return null;
+  const p = c[j].c;
+  const ret = m => clampF(Math.log(p / c[j - m].c) / (s * Math.sqrt(m)));
+  const flow = m => { let b = 0, v = 0; for (let i = j - m + 1; i <= j; i++) { b += c[i].tbv; v += c[i].v; } return v ? (2 * b - v) / v : 0; };
+  const closes = [];
+  for (let i = j - 99; i <= j; i++) closes.push(c[i].c);
+  const r = rsi(closes, 14);
+  const e9 = ema(closes.slice(-60), 9), e21 = ema(closes.slice(-90), 21);
+  let pv = 0, vv = 0, v15 = 0, v240 = 0;
+  for (let i = j - 59; i <= j; i++) { pv += (c[i].h + c[i].l + c[i].c) / 3 * c[i].v; vv += c[i].v; }
+  for (let i = j - 14; i <= j; i++) v15 += c[i].v;
+  for (let i = j - 239; i <= j; i++) v240 += c[i].v;
+  return {
+    mom5: ret(5), mom15: ret(15), mom60: ret(60),
+    flow1: flow(1), flow5: flow(5), flow15: flow(15), flow60: flow(60),
+    rsi: r == null ? 0 : (r - 50) / 50,
+    trend: clampF(Math.log(e9 / e21) / s / 3),
+    vwap60: vv ? clampF(Math.log(p / (pv / vv)) / (s * Math.sqrt(30))) : 0,
+    volx: v240 ? clamp(Math.log((v15 / 15) / (v240 / 240) + 1e-9), -3, 3) : 0,
+  };
+}
+
+// Logistische regressie met gestandaardiseerde kenmerken en L2-regularisatie
+function trainLogit(X, y, l2, iters = 300) {
+  const n = X.length, d = X[0].length;
+  const mu = new Array(d).fill(0), sd = new Array(d).fill(0);
+  for (const x of X) for (let k = 0; k < d; k++) mu[k] += x[k] / n;
+  for (const x of X) for (let k = 0; k < d; k++) sd[k] += (x[k] - mu[k]) ** 2 / n;
+  for (let k = 0; k < d; k++) sd[k] = Math.sqrt(sd[k]) || 1;
+  const Z = X.map(x => x.map((v, k) => (v - mu[k]) / sd[k]));
+  const w = new Array(d).fill(0);
+  let b = 0;
+  for (let it = 0; it < iters; it++) {
+    const gw = new Array(d).fill(0);
+    let gb = 0;
+    for (let i = 0; i < n; i++) {
+      const z = Z[i];
+      let s = b;
+      for (let k = 0; k < d; k++) s += w[k] * z[k];
+      const e = 1 / (1 + Math.exp(-s)) - y[i];
+      gb += e;
+      for (let k = 0; k < d; k++) gw[k] += e * z[k];
+    }
+    b -= gb / n;
+    for (let k = 0; k < d; k++) w[k] -= gw[k] / n + l2 * w[k];
+  }
+  return { mu, sd, w, b };
+}
+
+function logitParts(m, x) {
+  const parts = x.map((v, k) => m.w[k] * (v - m.mu[k]) / m.sd[k]);
+  const s = parts.reduce((a, v) => a + v, m.b);
+  return { p: 1 / (1 + Math.exp(-s)), parts };
+}
+const predictLogit = (m, x) => logitParts(m, x).p;
+
+function evaluate(m, X, y, base) {
+  let hit = 0, brier = 0, brierBase = 0, selN = 0, selHit = 0;
+  for (let i = 0; i < X.length; i++) {
+    const p = predictLogit(m, X[i]), ok = (p >= 0.5) === (y[i] === 1);
+    if (ok) hit++;
+    brier += (p - y[i]) ** 2;
+    brierBase += (base - y[i]) ** 2;
+    if (Math.abs(p - 0.5) >= 0.05) { selN++; if (ok) selHit++; }
+  }
+  const n = X.length;
+  return { n, acc: hit / n, brier: brier / n, brierBase: brierBase / n, selN, selAcc: selN ? selHit / selN : null };
+}
+
+// Bouwt de datasets: één rij per venster (vooraf) en één rij per minuut in het venster
+function buildDatasets(c) {
+  const sig = sigmaSeries(c);
+  const pre = { X: [], y: [] }, inw = { X: [], y: [], zStat: [] };
+  for (let i = FEAT_LOOKBACK + 1; i + 14 < c.length; i++) {
+    if (c[i].t % WIN !== 0 || c[i + 14].t !== c[i].t + 14 * MIN || c[i - 1].t !== c[i].t - MIN) continue;
+    const open = c[i].o, y = c[i + 14].c >= open ? 1 : 0;
+    const f0 = featsAt(c, sig, i - 1);
+    if (f0) { pre.X.push(PRE_FEATS.map(k => f0[k])); pre.y.push(y); }
+    for (let k = 1; k <= 14; k++) {
+      const j = i + k - 1, f = featsAt(c, sig, j);
+      if (!f) continue;
+      f.z = clamp(Math.log(c[j].c / open) / (sig[j] * Math.sqrt(15 - k)), -6, 6);
+      inw.X.push(IN_FEATS.map(n => f[n])); inw.y.push(y); inw.zStat.push(f.z);
+    }
+  }
+  return { pre, inw };
+}
+
+function trainModels() {
+  const c = S.hist.candles;
+  if (c.length < FEAT_LOOKBACK + 2000) { S.model = { error: 'te weinig historie' }; return; }
+  const { pre, inw } = buildDatasets(c);
+  const split = (d, f) => {
+    const cut = Math.floor(d.X.length * f);
+    return [{ X: d.X.slice(0, cut), y: d.y.slice(0, cut) }, { X: d.X.slice(cut), y: d.y.slice(cut), zStat: d.zStat && d.zStat.slice(cut) }];
+  };
+  const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+  // 1) Eerlijke test: trainen op de eerste 70%, testen op de laatste 30% (die het model nooit zag)
+  const [preTr, preTe] = split(pre, 0.7), [inTr, inTe] = split(inw, 0.7);
+  const preVal = evaluate(trainLogit(preTr.X, preTr.y, 0.02), preTe.X, preTe.y, mean(preTr.y));
+  const inVal = evaluate(trainLogit(inTr.X, inTr.y, 0.001), inTe.X, inTe.y, mean(inTr.y));
+  let statBrier = 0;
+  inTe.zStat.forEach((z, i) => { statBrier += (soften(Phi(z)) - inTe.y[i]) ** 2; });
+  inVal.statBrier = statBrier / inTe.zStat.length;
+  // 2) Voor live gebruik: opnieuw trainen op alle data
+  S.model = {
+    pre: trainLogit(pre.X, pre.y, 0.02), inw: trainLogit(inw.X, inw.y, 0.001),
+    preVal, inVal, windows: pre.X.length, trainedAt: Date.now(),
+  };
+  // In het venster alleen het geleerde model gebruiken als het in de test beter was dan puur statistiek
+  S.model.useInw = inVal.brier < inVal.statBrier;
+}
+
+// Live kenmerken uit gesloten candles vóór tijdstip `before`
+function liveFeats(before) {
+  const cs = S.klines.filter(c => c.t + MIN <= Date.now() && c.t < before);
+  if (cs.length < FEAT_LOOKBACK + 2) return null;
+  return featsAt(cs, sigmaSeries(cs), cs.length - 1);
+}
+
+function prePredict(ws) {
+  if (!S.model || !S.model.pre) return null;
+  const f = liveFeats(ws);
+  if (!f) return null;
+  const { p, parts } = logitParts(S.model.pre, PRE_FEATS.map(k => f[k]));
+  return { p, parts: PRE_FEATS.map((k, i) => ({ k, v: parts[i] })) };
 }
 
 function analogue(k, z) {
@@ -743,11 +906,24 @@ function computeSignals(now) {
 function analyze(now) {
   const ws = winStart(now), we = ws + WIN;
   const a = { ws, we, minsLeft: (we - now) / MIN, sg: computeSignals(now), op: currentOpen(ws) };
-  if (a.sg) a.pNext = Phi(NEXT_K * a.sg.score);
+  // Vooraf-voorspelling: geleerd model als dat klaar is, anders de vuistregel
+  a.next = prePredict(we);
+  a.pNext = a.next ? a.next.p : a.sg ? Phi(NEXT_K * a.sg.score) : null;
+  if (now - ws < 30000) { const cur = prePredict(ws); a.pPre = cur && cur.p; }
   if (!a.sg || !a.op) return a;
   a.z = zScore(a.sg.price, a.op.px, a.sg.sigma, a.minsLeft);
   a.pStat = soften(Phi(a.z));
   a.pSig = soften(Phi(a.z + SIGNAL_K * a.sg.score));
+  a.learned = false;
+  const m = S.model;
+  if (m && m.inw && m.useInw) {
+    const f = liveFeats(Infinity);
+    if (f) {
+      const x = { ...f, z: clamp(a.z, -6, 6), flow1: a.sg.flow1 };
+      a.pSig = soften(predictLogit(m.inw, IN_FEATS.map(k => x[k])));
+      a.learned = true;
+    }
+  }
   return a;
 }
 
@@ -760,13 +936,18 @@ function findCandle(t) {
 }
 
 function trackTick(now, a) {
-  if (a.pSig == null) return;
   const elapsed = (now - a.ws) / MIN;
   for (const cp of CHECKPOINTS) {
     if (elapsed < cp || elapsed >= cp + 0.5) continue;
+    const p = cp === 0 ? a.pPre : a.pSig;     // checkpoint 0 = voorspelling vooraf
+    if (p == null) continue;
     let e = S.track.find(x => x.ws === a.ws);
-    if (!e) { e = { ws: a.ws, open: a.op.px, p: {} }; S.track.push(e); }
-    if (e.p[cp] == null) { e.p[cp] = Math.round(a.pSig * 1e4) / 1e4; e.open = a.op.px; trSave(); }
+    if (!e) { e = { ws: a.ws, p: {} }; S.track.push(e); }
+    if (e.p[cp] == null) {
+      e.p[cp] = Math.round(p * 1e4) / 1e4;
+      if (a.op) e.open = a.op.px;
+      trSave();
+    }
   }
 }
 
@@ -775,7 +956,8 @@ function resolveTrack(now) {
   for (const x of S.track) {
     if (x.res || now < x.ws + WIN + 3000) continue;
     const c = findCandle(x.ws + 14 * MIN);
-    if (c) { x.close = c.c; x.res = c.c >= x.open ? 'UP' : 'DOWN'; changed = true; }
+    const open = x.open ?? (findCandle(x.ws) || {}).o;
+    if (c && open) { x.close = c.c; x.res = c.c >= open ? 'UP' : 'DOWN'; changed = true; }
     else if (!S.hist.loading && now - x.ws > (HIST_DAYS - 1) * 24 * 60 * MIN) { x.res = 'onbekend'; changed = true; }
   }
   if (changed) trSave();
@@ -842,6 +1024,7 @@ function renderVerdict(a, price) {
 function renderBreakdown(a) {
   $('pStat').textContent = fmtPct(a.pStat); setPbar('bStat', a.pStat);
   $('pSig').textContent = fmtPct(a.pSig); setPbar('bSig', a.pSig);
+  $('sigSub').textContent = a.learned ? 'geleerd model: afstand + order flow + chart' : '+ order flow, orderboek, momentum (vuistregel)';
   const an = S.analog;
   if (an && an.p != null) {
     const [lo, hi] = wilson(an.up, an.n);
@@ -852,7 +1035,7 @@ function renderBreakdown(a) {
       : `${an.n} vergelijkbare momenten, marge ${fmtPct(lo, 0)}–${fmtPct(hi, 0)}`;
   } else {
     $('pHist').textContent = '–'; setPbar('bHist', null);
-    $('analogSub').textContent = S.hist.loading ? 'laatste 7 dagen laden…' : (S.hist.error ? 'historie niet beschikbaar' : 'te weinig vergelijkbare momenten');
+    $('analogSub').textContent = S.hist.loading ? 'laatste 21 dagen laden…' : (S.hist.error ? 'historie niet beschikbaar' : 'te weinig vergelijkbare momenten');
   }
 }
 
@@ -939,6 +1122,61 @@ function renderNext(a, now) {
   $('pNext').textContent = fmtPct(a.pNext); setPbar('bNext', a.pNext);
   const br = baseRate();
   $('pBase').textContent = br ? fmtPct(br.p) : '–'; setPbar('bBase', br && br.p);
+  const m = S.model;
+  $('nextSub').textContent = a.next ? 'geleerd model: chart + order flow' : (m && m.error ? 'model niet beschikbaar — vuistregel' : 'model wordt getraind… (vuistregel)');
+  const why = $('nextWhy');
+  why.innerHTML = '';
+  if (a.next) {
+    for (const { k, v } of [...a.next.parts].sort((x, y) => Math.abs(y.v) - Math.abs(x.v)).slice(0, 4)) {
+      const row = document.createElement('div'); row.className = 'row';
+      const l = document.createElement('span'); l.textContent = FEAT_NAMES[k];
+      const mt = document.createElement('span'); mt.className = 'meter'; const i = document.createElement('i'); i.id = 'why-' + k; mt.appendChild(i);
+      const r = document.createElement('span'); r.className = 'val mono ' + (v >= 0 ? 'up-c' : 'down-c'); r.textContent = v >= 0 ? '→ UP' : '→ DOWN';
+      row.append(l, mt, r); why.appendChild(row);
+      setMeter(i.id, v * 4);
+    }
+  }
+  const vEl = $('nextVerdict');
+  if (!a.next || !m || !m.preVal) { vEl.textContent = 'Vóór de start is het vrijwel altijd ~50/50. Zodra het model getraind is, zie je hier of het vooraf iets voorspelt.'; return; }
+  const useful = m.preVal.acc >= 0.52 && m.preVal.brier < m.preVal.brierBase;
+  const p = a.next.p, side = p >= 0.5 ? 'UP' : 'DOWN';
+  if (!useful) vEl.textContent = `In de test voorspelde het model vooraf maar ${fmtPct(m.preVal.acc, 1)} goed — niet beter dan gokken. Advies: niet vooraf inzetten, wacht tot het venster loopt.`;
+  else if (Math.abs(p - 0.5) < 0.05) vEl.textContent = `Geen duidelijke voorkeur (${fmtPct(p)}). Het model zat in de test alleen bij duidelijke voorspellingen vaker goed.`;
+  else vEl.textContent = `Voorkeur ${side} (${fmtPct(Math.max(p, 1 - p))}). In de test was het model bij zulke duidelijke voorspellingen ${fmtPct(m.preVal.selAcc, 0)} van de keren goed (${m.preVal.selN}×).`;
+}
+
+function renderModel() {
+  const m = S.model;
+  if (!m) return;
+  if (m.error) { $('modelSum').textContent = 'Model niet getraind: ' + m.error + '.'; return; }
+  const pv = m.preVal, iv = m.inVal;
+  $('modelSum').textContent = `Getraind op ${m.windows} vensters (${HIST_DAYS} dagen), om ${fmtTime(m.trainedAt)}. Wordt elk uur opnieuw getraind. ` +
+    (m.useInw ? 'In het venster gebruikt de hoofdbalk het geleerde model (was in de test beter dan puur statistiek).' : 'In het venster was het geleerde model in de test niet beter dan puur statistiek, dus de hoofdbalk gebruikt statistiek + vuistregels.');
+  const row = (name, v, extra) => `<tr><td>${name}</td><td class="mono">${fmtPct(v.acc, 1)}</td><td class="mono ${v.brier < v.brierBase ? 'ok' : 'bad'}">${v.brier.toFixed(4)}</td><td class="mono muted">${v.brierBase.toFixed(4)}</td><td class="mono muted">${v.n}</td></tr>` + (extra || '');
+  $('modelVal').innerHTML =
+    row('Vooraf (alle)', pv) +
+    (pv.selN ? `<tr><td>Vooraf, alleen duidelijke (&gt;55% / &lt;45%)</td><td class="mono">${fmtPct(pv.selAcc, 1)}</td><td></td><td></td><td class="mono muted">${pv.selN}</td></tr>` : '') +
+    row('Tijdens venster', iv) +
+    `<tr><td>Tijdens venster, puur statistiek</td><td></td><td class="mono">${iv.statBrier.toFixed(4)}</td><td></td><td></td></tr>`;
+  const wEl = $('modelW');
+  wEl.innerHTML = '';
+  PRE_FEATS.map((k, i) => ({ k, w: m.pre.w[i] })).sort((x, y) => Math.abs(y.w) - Math.abs(x.w)).forEach(({ k, w }) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const l = document.createElement('span'); l.textContent = FEAT_NAMES[k];
+    const mt = document.createElement('span'); mt.className = 'meter'; const i = document.createElement('i'); i.id = 'w-' + k; mt.appendChild(i);
+    const r = document.createElement('span'); r.className = 'val mono'; r.textContent = fmtSigned(w, 3);
+    row.append(l, mt, r); wEl.appendChild(row);
+    setMeter(i.id, w * 10);
+  });
+}
+
+function retrain() {
+  if (S.hist.loading || S.hist.error) return;
+  $('modelSum').textContent = 'Model trainen…';
+  setTimeout(() => {
+    try { trainModels(); } catch (e) { S.model = { error: e.message }; }
+    renderModel();
+  }, 50);
 }
 
 function renderRecent(now) {
@@ -972,7 +1210,7 @@ function renderTrack() {
     if (!xs.length) return null;
     const hits = xs.filter(e => (e.p[cp] >= 0.5) === (e.res === 'UP')).length;
     const brier = xs.reduce((s, e) => s + (e.p[cp] - (e.res === 'UP' ? 1 : 0)) ** 2, 0) / xs.length;
-    return `na ${cp}m: ${hits}/${xs.length} goed (${fmtPct(hits / xs.length, 0)}), Brier ${brier.toFixed(3)}`;
+    return `${cp ? `na ${cp}m` : "vooraf"}: ${hits}/${xs.length} goed (${fmtPct(hits / xs.length, 0)}), Brier ${brier.toFixed(3)}`;
   }).filter(Boolean);
   $('trackSum').textContent = parts.join(' · ') + '  (Brier: lager is beter, 0,25 = gokken)';
 }
@@ -1104,7 +1342,11 @@ function onNewWindow(ws) {
   S.curWs = ws;
   S.manualPm = { up: null, down: null };
   $('pmUpIn').value = ''; $('pmDownIn').value = '';
-  if (!first) { $('openInput').value = ''; rebuildSamples(); renderCalib(); }
+  if (!first) {
+    $('openInput').value = '';
+    rebuildSamples(); renderCalib();
+    if (ws % (60 * MIN) === 0) retrain();     // elk heel uur opnieuw leren
+  }
   loadPolymarket(ws);
 }
 
