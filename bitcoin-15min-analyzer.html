@@ -139,6 +139,14 @@ td.wrap { white-space: normal; text-align: left; }
     <canvas id="chart"></canvas>
   </section>
 
+  <!-- Highs & lows -->
+  <section class="card wide">
+    <h2>Highs &amp; lows — belangrijke niveaus en uitbraken</h2>
+    <div class="tablewrap"><table><thead><tr><th>Niveau</th><th>Prijs</th><th>Afstand</th><th>Kans geraakt in dit venster</th><th>Status</th></tr></thead><tbody id="levels"><tr><td colspan="5" class="muted">Laden…</td></tr></tbody></table></div>
+    <div id="levelSum" class="edge small">–</div>
+    <p class="small muted" style="margin:8px 0 0"><b>Doorbroken</b> = de prijs staat er nu voorbij (uitbraak). <b>Sweep</b> = de prijs ging er even doorheen maar staat weer terug — vaak een teken dat de beweging geen kracht had (stops werden geraakt). Hoe vaak dit historisch werkte zie je bij Patroonherkenning (✓/✗). De niveaus staan ook als stippellijnen in de chart.</p>
+  </section>
+
   <!-- Kansen -->
   <section class="card">
     <h2>Kans op UP — drie invalshoeken</h2>
@@ -262,6 +270,7 @@ td.wrap { white-space: normal; text-align: left; }
       <li><strong>Signalen:</strong> order flow (wie koopt/verkoopt agressief), het orderboek, momentum, trend en RSI schuiven de kans een beetje op (maximaal ±10 procentpunt rond 50%). Dit zijn vuistregels, geen bewezen voorspellers — het orderboek kan bijvoorbeeld nep-orders (spoofing) bevatten.</li>
       <li><strong>Geleerd model:</strong> de pagina downloadt 21 dagen aan 1-minuut-data en leert daaruit zelf hoeveel momentum, order flow (5/15/60 min), RSI, trend, VWAP en volume echt zeggen over de uitkomst — zowel vooraf als tijdens het venster. Het wordt getest op data die het niet gezien heeft, en elk uur opnieuw getraind. Is het in die test niet beter dan gokken, dan zegt de pagina dat eerlijk.</li>
       <li><strong>Patroonherkenning:</strong> (1) de pagina zoekt in 21 dagen de 40 momenten waarop prijs én order flow er het meest uitzagen als nu en telt hoe vaak het daarna omhoog ging; (2) bekende patronen (engulfing, hamer, doji, uitbraken, reeksen, koopdruk, divergentie, volumepieken, tijdstip) worden geteld en apart getest. Alleen patronen met ✓ hielden in de test stand.</li>
+      <li><strong>Highs &amp; lows:</strong> de pagina houdt de highs en lows bij van het vorige venster, het afgelopen uur, 4 uur en 24 uur, plus swing highs/lows en ronde getallen. Per niveau zie je of het doorbroken is, of er een "sweep" was (erdoorheen en terug), en hoe groot de kans is dat het nog in dit venster geraakt wordt. Uitbraken en sweeps zijn ook als patroon getest, en de afstand tot de highs/lows zit in het geleerde model.</li>
       <li><strong>Historisch vergelijkbaar:</strong> in de afgelopen 21 dagen, hoe vaak eindigde een venster UP als de prijs op hetzelfde moment ongeveer even ver van de open stond.</li>
       <li><strong>Modelcheck &amp; track record:</strong> laten zien hoe goed de kansen in het verleden klopten. Vertrouw de tool pas als die cijfers er goed uitzien.</li>
     </ul>
@@ -648,12 +657,13 @@ function rebuildSamples() {
 // ---------- Leermodel ----------
 // Kenmerken die de chart en de order flow beschrijven, berekend met candles t/m index j.
 // Precies dezelfde functie wordt gebruikt voor training (historie) en live voorspellen.
-const PRE_FEATS = ['mom5', 'mom15', 'mom60', 'flow5', 'flow15', 'flow60', 'rsi', 'trend', 'vwap60', 'volx'];
+const PRE_FEATS = ['mom5', 'mom15', 'mom60', 'flow5', 'flow15', 'flow60', 'rsi', 'trend', 'vwap60', 'volx', 'dHi60', 'dLo60', 'dHi240', 'dLo240'];
 const IN_FEATS = ['z', 'flow1', 'flow5', 'mom5', 'trend', 'rsi'];
 const FEAT_NAMES = {
   z: 'Afstand tot open', mom5: 'Momentum 5 min', mom15: 'Momentum 15 min', mom60: 'Momentum 60 min',
   flow1: 'Order flow 1 min', flow5: 'Order flow 5 min', flow15: 'Order flow 15 min', flow60: 'Order flow 60 min',
   rsi: 'RSI', trend: 'Trend EMA 9/21', vwap60: 'Prijs vs. VWAP 60 min', volx: 'Volume vs. normaal',
+  dHi60: 'Afstand tot 1-uurs high', dLo60: 'Afstand tot 1-uurs low', dHi240: 'Afstand tot 4-uurs high', dLo240: 'Afstand tot 4-uurs low',
 };
 const FEAT_LOOKBACK = 240;
 const clampF = x => clamp(x, -4, 4);
@@ -671,8 +681,15 @@ function featsAt(c, sig, j) {
   let pv = 0, vv = 0, v15 = 0, v240 = 0;
   for (let i = j - 59; i <= j; i++) { pv += (c[i].h + c[i].l + c[i].c) / 3 * c[i].v; vv += c[i].v; }
   for (let i = j - 14; i <= j; i++) v15 += c[i].v;
-  for (let i = j - 239; i <= j; i++) v240 += c[i].v;
+  let hi60 = -Infinity, lo60 = Infinity, hi240 = -Infinity, lo240 = Infinity;
+  for (let i = j - 239; i <= j; i++) {
+    v240 += c[i].v;
+    hi240 = Math.max(hi240, c[i].h); lo240 = Math.min(lo240, c[i].l);
+    if (i > j - 60) { hi60 = Math.max(hi60, c[i].h); lo60 = Math.min(lo60, c[i].l); }
+  }
+  const dist = (lvl, m) => clampF(Math.log(p / lvl) / (s * Math.sqrt(m)));
   return {
+    dHi60: dist(hi60, 60), dLo60: dist(lo60, 60), dHi240: dist(hi240, 240), dLo240: dist(lo240, 240),
     mom5: ret(5), mom15: ret(15), mom60: ret(60),
     flow1: flow(1), flow5: flow(5), flow15: flow(15), flow60: flow(60),
     rsi: r == null ? 0 : (r - 50) / 50,
@@ -897,6 +914,14 @@ const PATTERNS = [
   ['sellFlow', 'Sterke verkoopdruk (order flow < −8%)', (W, w) => wFlow(W[w]) < -0.08],
   ['divBull', 'Prijs omlaag, maar kopers overheersen', (W, w) => !wUp(W[w]) && wFlow(W[w]) > 0.04],
   ['divBear', 'Prijs omhoog, maar verkopers overheersen', (W, w) => wUp(W[w]) && wFlow(W[w]) < -0.04],
+  ['prevHiBrk', 'Slot boven high van vorig venster', (W, w) => W[w].c > W[w - 1].h],
+  ['prevLoBrk', 'Slot onder low van vorig venster', (W, w) => W[w].c < W[w - 1].l],
+  ['sweepHi', 'Sweep van uur-high (erboven geweest, slot eronder)', (W, w, x) => W[w].h > x.hi1 && W[w].c < x.hi1],
+  ['sweepLo', 'Sweep van uur-low (eronder geweest, slot erboven)', (W, w, x) => W[w].l < x.lo1 && W[w].c > x.lo1],
+  ['brk4Up', 'Uitbraak boven 4-uurs high', (W, w, x) => W[w].c > x.hi4],
+  ['brk4Down', 'Uitbraak onder 4-uurs low', (W, w, x) => W[w].c < x.lo4],
+  ['brkDUp', 'Uitbraak boven 24-uurs high', (W, w, x) => W[w].c > x.hiD],
+  ['brkDDown', 'Uitbraak onder 24-uurs low', (W, w, x) => W[w].c < x.loD],
   ['volSpike', 'Volume > 2× normaal', (W, w, x) => W[w].v > 2 * x.vAvg],
   ['quiet', 'Heel rustig (volume < 0,5× normaal)', (W, w, x) => W[w].v < 0.5 * x.vAvg],
 ];
@@ -907,7 +932,9 @@ function winCtx(W, w) {
   let ss = 0, vAvg = 0;
   for (let k = 1; k <= 96; k++) ss += wRet(W[w - k]) ** 2;
   for (let k = 1; k <= 16; k++) vAvg += W[w - k].v / 16;
-  return { s: Math.sqrt(ss / 96), vAvg };
+  const hiLo = n => { let h = -Infinity, l = Infinity; for (let k = 1; k <= n; k++) { h = Math.max(h, W[w - k].h); l = Math.min(l, W[w - k].l); } return [h, l]; };
+  const [hi1, lo1] = hiLo(4), [hi4, lo4] = hiLo(16), [hiD, loD] = hiLo(96);
+  return { s: Math.sqrt(ss / 96), vAvg, hi1, lo1, hi4, lo4, hiD, loD };
 }
 
 function buildPatternStats() {
@@ -961,6 +988,104 @@ function patternsLive() {
   if (!x) return null;
   const active = PATTERNS.filter(([, , f]) => f(W, w, x)).map(([id, name]) => ({ id, name, s: P.stats[id], v: patVerdict(P.stats[id]) }));
   return { active, tod: P.tod[fmtTime(ws + WIN)], todKey: fmtTime(ws + WIN) };
+}
+
+// ---------- Highs & lows ----------
+function rangeHL(cs, from, to) {
+  let h = -Infinity, l = Infinity;
+  for (let i = cs.length - 1; i >= 0; i--) {
+    const c = cs[i];
+    if (c.t < from) break;
+    if (c.t < to) { h = Math.max(h, c.h); l = Math.min(l, c.l); }
+  }
+  return isFinite(h) ? { h, l } : null;
+}
+
+// Swing highs/lows: 5-min candles waarvan de top/bodem hoger/lager is dan 3 candles links én rechts
+function swings(cs, ws) {
+  const bars = [];
+  for (const c of cs) {
+    if (c.t >= ws || c.t < ws - 6 * 60 * MIN) continue;
+    const t5 = Math.floor(c.t / (5 * MIN));
+    const b = bars[bars.length - 1];
+    if (b && b.k === t5) { b.h = Math.max(b.h, c.h); b.l = Math.min(b.l, c.l); }
+    else bars.push({ k: t5, h: c.h, l: c.l });
+  }
+  const highs = [], lows = [];
+  for (let i = 3; i + 3 < bars.length; i++) {
+    const nb = [-3, -2, -1, 1, 2, 3].map(d => bars[i + d]);
+    if (nb.every(b => b.h < bars[i].h)) highs.push(bars[i].h);
+    if (nb.every(b => b.l > bars[i].l)) lows.push(bars[i].l);
+  }
+  return { highs, lows };
+}
+
+function keyLevels(a) {
+  const k = S.klines;
+  if (k.length < 250 || !a.sg) return null;
+  const ws = a.ws, price = a.sg.price;
+  const lv = [];
+  const add = (name, px, kind, show = true) => { if (px && isFinite(px)) lv.push({ name, px, kind, show }); };
+  const prev = rangeHL(k, ws - WIN, ws), hour = rangeHL(k, ws - 4 * WIN, ws), h4 = rangeHL(k, ws - 16 * WIN, ws);
+  const day = S.hist.candles.length ? rangeHL(S.hist.candles, ws - 96 * WIN, ws) : null;
+  if (prev) { add('High vorig venster', prev.h, 'high'); add('Low vorig venster', prev.l, 'low'); }
+  if (hour) { add('High afgelopen uur', hour.h, 'high'); add('Low afgelopen uur', hour.l, 'low'); }
+  if (h4) { add('High 4 uur', h4.h, 'high'); add('Low 4 uur', h4.l, 'low'); }
+  if (day) { add('High 24 uur', day.h, 'high'); add('Low 24 uur', day.l, 'low'); }
+  const sw = swings(k, ws);
+  const swUp = sw.highs.filter(h => h > price).sort((x, y) => x - y)[0];
+  const swDown = sw.lows.filter(l => l < price).sort((x, y) => y - x)[0];
+  add('Swing high (dichtstbij boven)', swUp, 'high');
+  add('Swing low (dichtstbij onder)', swDown, 'low');
+  add('Rond getal boven', Math.ceil(price / 500) * 500, 'high', false);
+  add('Rond getal onder', Math.floor(price / 500) * 500, 'low', false);
+
+  // Hoe ver is de prijs in dit venster al gekomen?
+  const cur = rangeHL(k, ws, ws + WIN) || { h: price, l: price };
+  const winH = Math.max(cur.h, price), winL = Math.min(cur.l, price);
+  const sdLeft = a.sg.sigma * Math.sqrt(Math.max(a.minsLeft, 1 / 60));
+  for (const l of lv) {
+    const d = Math.log(l.px / price);
+    l.dist = l.px - price;
+    // Kans om het niveau vóór het einde te raken (reflectieprincipe): 2·(1 − Φ(|d| / σ√T))
+    l.pTouch = Math.min(1, 2 * (1 - Phi(Math.abs(d) / sdLeft)));
+    if (l.kind === 'high') l.status = price > l.px ? (winL <= l.px ? 'brk' : 'above') : winH > l.px ? 'sweep' : 'open';
+    else l.status = price < l.px ? (winH >= l.px ? 'brk' : 'below') : winL < l.px ? 'sweep' : 'open';
+  }
+  // niveaus op dezelfde prijs samenvoegen: "Low vorig venster = Low afgelopen uur"
+  const byKey = new Map();
+  for (const l of lv) {
+    const key = l.kind + Math.round(l.px), prev = byKey.get(key);
+    if (prev) { prev.name += ' = ' + l.name.replace(/^(High|Low) /, ''); prev.show = prev.show || l.show; }
+    else byKey.set(key, l);
+  }
+  return [...byKey.values()].sort((x, y) => y.px - x.px);
+}
+
+function renderLevels(a) {
+  const lv = keyLevels(a);
+  S.levels = lv;
+  if (!lv) return;
+  const st = {
+    brk: l => l.kind === 'high' ? ['<span class="up-c">doorbroken ↑ (in dit venster)</span>', 1] : ['<span class="down-c">doorbroken ↓ (in dit venster)</span>', -1],
+    above: () => ['<span class="muted">staat erboven</span>', 0],
+    below: () => ['<span class="muted">staat eronder</span>', 0],
+    sweep: l => l.kind === 'high' ? ['<span class="warn-c">sweep: erboven geweest, terug eronder</span>', -1] : ['<span class="warn-c">sweep: eronder geweest, terug erboven</span>', 1],
+    open: () => ['<span class="muted">nog niet geraakt</span>', 0],
+  };
+  let bull = [], bear = [];
+  $('levels').innerHTML = lv.map(l => {
+    const [html, dir] = st[l.status](l);
+    if (dir > 0) bull.push(l.name); if (dir < 0) bear.push(l.name);
+    const isNear = l.status === 'open' && l.pTouch > 0.5;
+    return `<tr><td class="wrap">${l.name}</td><td class="mono">${fmtUsd(l.px, 0)}</td><td class="mono ${l.dist >= 0 ? 'up-c' : 'down-c'}">${l.dist >= 0 ? '+' : '−'}${fmtUsd(Math.abs(l.dist), 0)}</td><td class="mono${isNear ? ' warn-c' : ''}">${l.status === 'open' ? fmtPct(l.pTouch, 0) : '–'}</td><td class="wrap">${html}</td></tr>`;
+  }).join('');
+  const parts = [];
+  if (bull.length) parts.push(`Bullish: ${bull.join(', ')}.`);
+  if (bear.length) parts.push(`Bearish: ${bear.join(', ')}.`);
+  const near = lv.filter(l => l.status === 'open').sort((x, y) => y.pTouch - x.pTouch)[0];
+  if (near) parts.push(`Dichtstbijzijnde niveau: ${near.name.toLowerCase()} op ${fmtUsd(near.px, 0)} (${fmtPct(near.pTouch, 0)} kans dat het geraakt wordt).`);
+  $('levelSum').textContent = parts.join(' ') || 'Geen niveaus doorbroken in dit venster.';
 }
 
 function buildPatterns() {
@@ -1620,6 +1745,20 @@ function drawChart(a) {
     ctx.fillStyle = col.panel; ctx.textBaseline = 'middle';
     ctx.fillText(text, w - padR + 5, y);
   };
+  // highs & lows als stippellijnen (alleen niveaus die binnen beeld vallen)
+  ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  for (const l of S.levels || []) {
+    if (!l.show || l.px < lo || l.px > hi) continue;
+    const y = Math.round(Y(l.px)) + 0.5;
+    ctx.setLineDash([2, 4]); ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = l.kind === 'high' ? col.down : col.up;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    ctx.fillStyle = col.text; ctx.textBaseline = l.kind === 'high' ? 'bottom' : 'top';
+    ctx.fillText(l.name.replace(' (dichtstbij boven)', '').replace(' (dichtstbij onder)', ''), padL + 4, l.kind === 'high' ? y - 2 : y + 2);
+  }
+  ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  ctx.textBaseline = 'middle';
   if (open) {
     const y = Math.round(Y(open)) + 0.5;
     ctx.setLineDash([5, 4]); ctx.strokeStyle = col.accent;
@@ -1663,6 +1802,7 @@ function tick() {
   renderFlow(a);
   renderIndicators(a);
   renderNext(a, now);
+  renderLevels(a);
   drawChart(a);
   trackTick(now, a);
 }
