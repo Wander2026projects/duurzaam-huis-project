@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC 15-min Analyzer</title>
+<style>
+:root {
+  --bg: #f3f4f6; --panel: #ffffff; --panel-2: #eef0f3; --text: #14171c; --muted: #5b6472; --border: #dde1e7;
+  --up: #0c8f50; --down: #d13a2f; --accent: #2563eb; --warn: #a75b06;
+  --up-soft: rgba(12,143,80,.13); --down-soft: rgba(209,58,47,.13); --win-bg: rgba(37,99,235,.07); --grid: rgba(0,0,0,.07);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1f2630; --text: #e6edf3; --muted: #8b949e; --border: #2a313c;
+    --up: #2fc786; --down: #f2554f; --accent: #58a6ff; --warn: #e3a33b;
+    --up-soft: rgba(47,199,134,.15); --down-soft: rgba(242,85,79,.15); --win-bg: rgba(88,166,255,.08); --grid: rgba(255,255,255,.07);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161b22; --panel-2: #1f2630; --text: #e6edf3; --muted: #8b949e; --border: #2a313c;
+  --up: #2fc786; --down: #f2554f; --accent: #58a6ff; --warn: #e3a33b;
+  --up-soft: rgba(47,199,134,.15); --down-soft: rgba(242,85,79,.15); --win-bg: rgba(88,166,255,.08); --grid: rgba(255,255,255,.07);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 14px 16px 4px; max-width: 1280px; margin: 0 auto; }
+header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: var(--up); box-shadow: 0 0 0 3px var(--up-soft); }
+.dot.warn { background: var(--warn); }
+.dot.err { background: var(--down); }
+main { display: grid; gap: 12px; padding: 12px 16px 32px; max-width: 1280px; margin: 0 auto; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+.wide { grid-column: 1 / -1; }
+.label { font-size: 12px; color: var(--muted); }
+.small { font-size: 12px; }
+.muted { color: var(--muted); }
+.big { font-size: 22px; font-weight: 650; }
+.xl { font-size: 24px; font-weight: 650; }
+.up-c { color: var(--up); } .down-c { color: var(--down); } .warn-c { color: var(--warn); }
+.hero-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.hero-top .right { text-align: right; min-width: 140px; }
+.progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.progress > div { height: 100%; width: 0; background: var(--accent); }
+.prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
+.probbar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; background: var(--panel-2); }
+.probbar > div { display: flex; align-items: center; padding: 0 10px; font-weight: 700; color: #fff; white-space: nowrap; transition: width .4s; min-width: 0; overflow: hidden; }
+.probbar .u { background: var(--up); }
+.probbar .d { background: var(--down); justify-content: flex-end; }
+.verdict { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); }
+.verdict b { font-size: 15px; }
+.verdict .warnline { color: var(--warn); margin-top: 4px; }
+details.override { margin-top: 10px; }
+details.override summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+input[type=text] { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; width: 130px; }
+button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+canvas { width: 100%; height: 340px; display: block; }
+.row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.row .val { text-align: right; min-width: 78px; }
+.row .sub { display: block; font-size: 11px; color: var(--muted); }
+.meter { position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.meter::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--muted); opacity: .5; }
+.meter i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+.meter i.pos { background: var(--up); } .meter i.neg { background: var(--down); }
+.pbar { position: relative; height: 8px; background: var(--down-soft); border-radius: 4px; overflow: hidden; }
+.pbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--up); width: 50%; }
+.pbar::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--text); opacity: .35; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.tablewrap { overflow-x: auto; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.chip.up { background: var(--up-soft); color: var(--up); } .chip.down { background: var(--down-soft); color: var(--down); }
+.ok { color: var(--up); } .bad { color: var(--down); }
+.trades { list-style: none; margin: 8px 0 0; padding: 0; max-height: 180px; overflow: auto; }
+.trades li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
+.edge { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); }
+.explain p, .explain li { color: var(--muted); }
+.explain ul { padding-left: 18px; margin: 6px 0; }
+.explain strong { color: var(--text); }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>BTC 15-min Up/Down Analyzer</h1>
+  <div class="pill"><span id="connDot" class="dot"></span><span id="connText">Starten…</span></div>
+</header>
+
+<main>
+  <!-- Hoofdkaart: huidig venster -->
+  <section class="card wide">
+    <div class="hero-top">
+      <div>
+        <div class="label">Huidig venster (jouw tijd)</div>
+        <div id="winLabel" class="big mono">--:-- – --:--</div>
+        <div id="winEt" class="small muted"></div>
+      </div>
+      <div class="right">
+        <div class="label">Resterend</div>
+        <div id="countdown" class="big mono">--:--</div>
+        <div class="progress"><div id="progress"></div></div>
+      </div>
+    </div>
+    <div class="prices">
+      <div><div class="label">BTC nu (Binance)</div><div id="price" class="mono xl">–</div></div>
+      <div><div class="label">Price to beat (open)</div><div id="openPx" class="mono xl">–</div><div id="openSrc" class="small muted"></div></div>
+      <div><div class="label">Verschil t.o.v. open</div><div id="diff" class="mono xl">–</div><div id="diffSigma" class="small muted"></div></div>
+    </div>
+    <div class="probbar"><div id="barUp" class="u" style="width:50%">UP –</div><div id="barDown" class="d" style="width:50%">– DOWN</div></div>
+    <div id="verdict" class="verdict">Data laden…</div>
+    <details class="override">
+      <summary>Price to beat van Polymarket handmatig invullen (aanrader als de prijs dicht bij de open staat)</summary>
+      <div class="inline">
+        <input id="openInput" type="text" inputmode="decimal" placeholder="bijv. 124350.12">
+        <button id="openSet">Gebruik</button>
+        <button id="openReset">Terug naar automatisch</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- Chart -->
+  <section class="card wide">
+    <h2>Chart — 1-min candles, venster gemarkeerd, gekleurde waaier = verwachte beweging (±1σ) tot het einde</h2>
+    <canvas id="chart"></canvas>
+  </section>
+
+  <!-- Kansen -->
+  <section class="card">
+    <h2>Kans op UP — drie invalshoeken</h2>
+    <div class="row"><span>Statistisch<span class="sub">afstand tot open ÷ verwachte beweging</span></span><span class="pbar"><i id="bStat"></i></span><span id="pStat" class="val mono">–</span></div>
+    <div class="row"><span>Met signalen<span class="sub">+ order flow, orderboek, momentum</span></span><span class="pbar"><i id="bSig"></i></span><span id="pSig" class="val mono">–</span></div>
+    <div class="row"><span>Historisch vergelijkbaar<span id="analogSub" class="sub">laatste 7 dagen laden…</span></span><span class="pbar"><i id="bHist"></i></span><span id="pHist" class="val mono">–</span></div>
+    <p class="small muted" style="margin:10px 0 0">De bovenste balk op de pagina gebruikt <b>Met signalen</b>. Als de drie ver uit elkaar liggen: voorzichtig.</p>
+  </section>
+
+  <!-- Polymarket -->
+  <section class="card">
+    <h2>Polymarket vergelijking</h2>
+    <div id="pmStatus" class="small muted">Markt zoeken…</div>
+    <div class="row"><span>UP <span class="sub">bied / vraag</span></span><span></span><span id="pmUp" class="val mono">–</span></div>
+    <div class="row"><span>DOWN <span class="sub">bied / vraag</span></span><span></span><span id="pmDown" class="val mono">–</span></div>
+    <div class="inline small">
+      <span class="muted">Zelf invullen (¢):</span>
+      <input id="pmUpIn" type="text" inputmode="decimal" placeholder="UP bijv. 55" style="width:96px">
+      <input id="pmDownIn" type="text" inputmode="decimal" placeholder="DOWN bijv. 47" style="width:96px">
+    </div>
+    <div id="edge" class="edge small">–</div>
+  </section>
+
+  <!-- Order flow -->
+  <section class="card">
+    <h2>Order flow</h2>
+    <div class="row"><span>Agressieve kopers (laatste 60 s)<span class="sub">market buys vs. market sells</span></span><span class="meter"><i id="mFlow1"></i></span><span id="vFlow1" class="val mono">–</span></div>
+    <div class="row"><span>Agressieve kopers (5 min)</span><span class="meter"><i id="mFlow5"></i></span><span id="vFlow5" class="val mono">–</span></div>
+    <div class="row"><span>Delta dit venster<span class="sub">gekocht − verkocht (BTC)</span></span><span class="meter"><i id="mDelta"></i></span><span id="vDelta" class="val mono">–</span></div>
+    <div class="row"><span>Orderboek (±0,05%)<span id="bookSub" class="sub">biedingen vs. aanbod</span></span><span class="meter"><i id="mBook"></i></span><span id="vBook" class="val mono">–</span></div>
+    <div class="label" style="margin-top:10px">Grote trades (≥ $100k)</div>
+    <ul id="bigTrades" class="trades"><li class="muted">Wachten op trades…</li></ul>
+  </section>
+
+  <!-- Indicatoren -->
+  <section class="card">
+    <h2>Chart-signalen</h2>
+    <div class="row"><span>Momentum (5 min)</span><span class="meter"><i id="mMom"></i></span><span id="vMom" class="val mono">–</span></div>
+    <div class="row"><span>Trend (EMA 9 vs 21)</span><span class="meter"><i id="mTrend"></i></span><span id="vTrend" class="val mono">–</span></div>
+    <div class="row"><span>RSI (14, 1 min)<span class="sub">&gt;70 overkocht, &lt;30 oververkocht</span></span><span class="meter"><i id="mRsi"></i></span><span id="vRsi" class="val mono">–</span></div>
+    <div class="row"><span>Prijs vs. VWAP venster</span><span></span><span id="vVwap" class="val mono">–</span></div>
+    <div class="row"><span>Volatiliteit<span class="sub">verwachte beweging per 15 min (1σ)</span></span><span></span><span id="vVol" class="val mono">–</span></div>
+    <div class="row"><span><b>Totale signaalscore</b><span class="sub">−1 = sterk DOWN, +1 = sterk UP</span></span><span class="meter"><i id="mScore"></i></span><span id="vScore" class="val mono">–</span></div>
+  </section>
+
+  <!-- Volgend venster -->
+  <section class="card">
+    <h2>Volgend venster</h2>
+    <div id="nextLabel" class="big mono">–</div>
+    <div id="nextStart" class="small muted"></div>
+    <div class="row" style="margin-top:8px"><span>Inschatting UP<span class="sub">alleen signalen; open is nog onbekend</span></span><span class="pbar"><i id="bNext"></i></span><span id="pNext" class="val mono">–</span></div>
+    <div class="row"><span>Basisfrequentie UP<span class="sub">alle vensters laatste 7 dagen</span></span><span class="pbar"><i id="bBase"></i></span><span id="pBase" class="val mono">–</span></div>
+    <p class="small muted" style="margin:10px 0 0">Vóór de start is het vrijwel altijd ~50/50. De echte informatie komt pas tijdens het venster.</p>
+  </section>
+
+  <!-- Recente vensters -->
+  <section class="card">
+    <h2>Laatste vensters (Binance)</h2>
+    <div class="tablewrap"><table><thead><tr><th>Venster</th><th>Open</th><th>Slot</th><th>Δ</th><th>Uitslag</th></tr></thead><tbody id="recent"></tbody></table></div>
+  </section>
+
+  <!-- Track record -->
+  <section class="card">
+    <h2>Eigen track record (in deze browser)</h2>
+    <div id="trackSum" class="small muted">Wordt opgebouwd zolang deze pagina open staat: de kans na 1, 5 en 10 minuten wordt bewaard en na afloop vergeleken met de uitslag.</div>
+    <div class="tablewrap"><table><thead><tr><th>Venster</th><th>na 1m</th><th>na 5m</th><th>na 10m</th><th>Uitslag</th></tr></thead><tbody id="track"></tbody></table></div>
+    <div class="inline"><button id="trackClear">Track record wissen</button></div>
+  </section>
+
+  <!-- Modelcheck -->
+  <section class="card">
+    <h2>Modelcheck (laatste 7 dagen)</h2>
+    <div id="calibSum" class="small muted">Historie laden…</div>
+    <div class="tablewrap"><table><thead><tr><th>Model zei</th><th>gem.</th><th>werkelijk UP</th><th>n</th></tr></thead><tbody id="calib"></tbody></table></div>
+    <div class="label" style="margin-top:10px">Trefkans van de statistische kans per minuut in het venster</div>
+    <div class="tablewrap"><table><thead><tr id="hitHead"></tr></thead><tbody><tr id="hitRow"></tr></tbody></table></div>
+  </section>
+
+  <!-- Uitleg -->
+  <section class="card wide explain">
+    <h2>Hoe werkt het — en waar moet je op letten</h2>
+    <ul>
+      <li><strong>De markt:</strong> bij Polymarket "Bitcoin Up or Down – 15 min" wint UP als de prijs aan het eind van het venster <em>gelijk aan of hoger</em> is dan de prijs aan het begin ("price to beat"). Vensters starten elk kwartier (:00, :15, :30, :45). Polymarket rekent met New York-tijd; 18:00 hier = 12:00 ET.</li>
+      <li><strong>Prijsbron:</strong> Polymarket gebruikt de Chainlink BTC/USD-feed, deze pagina gebruikt Binance BTC/USDT. Die verschillen meestal een paar tot tientallen dollars. Staat de prijs vlak bij de open, dan kan dat verschil de uitslag bepalen — vul dan de echte price to beat van Polymarket in.</li>
+      <li><strong>Statistische kans:</strong> hoe ver de prijs nu boven/onder de open staat, gedeeld door hoeveel BTC normaal beweegt in de resterende tijd (volatiliteit uit de laatste uren). Hoe minder tijd over, hoe zekerder.</li>
+      <li><strong>Signalen:</strong> order flow (wie koopt/verkoopt agressief), het orderboek, momentum, trend en RSI schuiven de kans een beetje op (maximaal ±10 procentpunt rond 50%). Dit zijn vuistregels, geen bewezen voorspellers — het orderboek kan bijvoorbeeld nep-orders (spoofing) bevatten.</li>
+      <li><strong>Historisch vergelijkbaar:</strong> in de afgelopen 7 dagen, hoe vaak eindigde een venster UP als de prijs op hetzelfde moment ongeveer even ver van de open stond.</li>
+      <li><strong>Modelcheck &amp; track record:</strong> laten zien hoe goed de kansen in het verleden klopten. Vertrouw de tool pas als die cijfers er goed uitzien.</li>
+    </ul>
+    <p><strong>Eerlijk gezegd:</strong> aan het begin van een venster is BTC vrijwel een muntworp; niemand voorspelt dat betrouwbaar. Een voordeel ontstaat hooguit als de prijs op Polymarket afwijkt van de werkelijke kans — en spread en fees eten een deel daarvan op. Gebruik dit als hulpmiddel, niet als garantie, en zet nooit meer in dan je kunt missen.</p>
+  </section>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+// ---------- Instellingen ----------
+const SYMBOL = 'BTCUSDT';
+const MIN = 60000;
+const WIN = 15 * MIN;
+const REST_BASES = ['https://api.binance.com', 'https://data-api.binance.vision'];
+const WS_BASES = ['wss://stream.binance.com:9443', 'wss://data-stream.binance.vision'];
+const PM_GAMMA = 'https://gamma-api.polymarket.com';
+const PM_CLOB = 'https://clob.polymarket.com';
+const EWMA_LAMBDA = 0.97;      // volatiliteit: halfwaardetijd ~23 min
+const SIGMA_FLOOR = 0.0002;    // minimaal 0,02% per minuut
+const SIGNAL_K = 0.25;         // max. verschuiving (in σ) door signalen
+const NEXT_K = 0.12;           // signalen voorspellen het volgende venster nog minder
+const BIG_TRADE_USD = 100000;
+const HIST_DAYS = 7;
+const NEAR_OPEN_USD = 25;      // binnen deze afstand kan Binance vs. Chainlink de uitslag bepalen
+const TR_KEY = 'btc15.trackrecord.v1';
+const CHECKPOINTS = [1, 5, 10];
+const WEIGHTS = { flow1: 0.25, flow5: 0.20, book: 0.15, mom: 0.20, trend: 0.10, rsi: 0.10 };
+
+// ---------- Status ----------
+const S = {
+  restBase: REST_BASES[0],
+  klines: [],            // 1m candles {t,o,h,l,c,v,tbv}, oplopend
+  trades: [],            // live aggTrades van de laatste ~5 min
+  bigTrades: [],
+  price: null,
+  winFirstTrade: null,
+  book: null, bookEma: null,
+  manualOpen: {},        // vensterstart -> price to beat
+  manualPm: { up: null, down: null },
+  pm: null,
+  hist: { candles: [], samples: [], loading: true, error: null },
+  analog: null,
+  track: [],
+  curWs: null,
+  ws: null, wsIdx: 0, wsFails: 0, lastMsg: 0, reconnectTimer: null,
+  last: null,
+};
+
+// ---------- Hulpfuncties ----------
+const $ = id => document.getElementById(id);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const winStart = t => Math.floor(t / WIN) * WIN;
+const timeFmt = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit' });
+const etFmt = new Intl.DateTimeFormat('nl-NL', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' });
+const fmtTime = t => timeFmt.format(new Date(t));
+const fmtEt = t => etFmt.format(new Date(t));
+const fmtUsd = (x, d = 2) => x == null || !isFinite(x) ? '–' : '$' + x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtPct = (p, d = 1) => p == null || !isFinite(p) ? '–' : (p * 100).toFixed(d) + '%';
+const sign = x => (x >= 0 ? '+' : '−');
+const fmtSigned = (x, d = 2) => x == null || !isFinite(x) ? '–' : sign(x) + Math.abs(x).toFixed(d);
+const fmtCountdown = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+const cents = p => p == null || !isFinite(p) ? '–' : (p * 100).toFixed(1) + '¢';
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function erf(x) { // Abramowitz & Stegun 7.1.26
+  const s = Math.sign(x); x = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * x);
+  const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return s * y;
+}
+const Phi = z => 0.5 * (1 + erf(z / Math.SQRT2));
+// Nooit 0% of 100%: pieken en het verschil Binance vs. Chainlink houden altijd wat restkans over
+const soften = p => 0.01 + 0.98 * p;
+
+function ewmaSigma(closes) {
+  const r = [];
+  for (let i = 1; i < closes.length; i++) r.push(Math.log(closes[i] / closes[i - 1]));
+  if (r.length < 30) return null;
+  let v = r.slice(0, 30).reduce((a, x) => a + x * x, 0) / 30;
+  for (let i = 30; i < r.length; i++) v = EWMA_LAMBDA * v + (1 - EWMA_LAMBDA) * r[i] * r[i];
+  return Math.max(Math.sqrt(v), SIGMA_FLOOR);
+}
+
+function ema(values, n) {
+  const a = 2 / (n + 1);
+  let e = values[0];
+  for (let i = 1; i < values.length; i++) e = a * values[i] + (1 - a) * e;
+  return e;
+}
+
+function rsi(closes, n = 14) {
+  if (closes.length < n + 1) return null;
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) g += d; else l -= d; }
+  g /= n; l /= n;
+  for (let i = n + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    g = (g * (n - 1) + Math.max(d, 0)) / n;
+    l = (l * (n - 1) + Math.max(-d, 0)) / n;
+  }
+  return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+}
+
+// z = hoeveel "verwachte bewegingen" de prijs boven/onder de open staat
+function zScore(price, open, sigma, minsLeft) {
+  return Math.log(price / open) / (sigma * Math.sqrt(Math.max(minsLeft, 1 / 60)));
+}
+
+function wilson(k, n, z = 1.96) {
+  if (!n) return [0, 1];
+  const p = k / n, d = 1 + z * z / n;
+  const c = (p + z * z / (2 * n)) / d;
+  const h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+  return [c - h, c + h];
+}
+
+function niceStep(raw) {
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / p;
+  return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
+}
+
+// Accepteert 124350.12, 124,350.12, 124.350,12 en 124350,12
+function parsePrice(s) {
+  s = String(s || '').trim().replace(/[\s$€]/g, '');
+  if (!s) return null;
+  const dot = s.lastIndexOf('.'), comma = s.lastIndexOf(',');
+  if (dot >= 0 && comma >= 0) {
+    const dec = dot > comma ? '.' : ',';
+    s = s.split(dec === '.' ? ',' : '.').join('').replace(dec, '.');
+  } else if (/^\d{1,3}([.,]\d{3})+$/.test(s)) {
+    s = s.replace(/[.,]/g, '');           // duizendtallen-scheiding
+  } else {
+    s = s.replace(',', '.');
+  }
+  const v = parseFloat(s);
+  return isFinite(v) && v > 0 ? v : null;
+}
+
+// Accepteert 55, 55¢, 0.55 en 0,55 -> 0.55
+function parseCents(s) {
+  s = String(s || '').trim().replace(/[\s¢c]/g, '').replace(',', '.');
+  if (!s) return null;
+  let v = parseFloat(s);
+  if (!isFinite(v) || v <= 0) return null;
+  if (v > 1) v /= 100;
+  return v < 1 ? v : null;
+}
+
+function setConn(kind, text) {
+  $('connDot').className = 'dot ' + kind;
+  $('connText').textContent = text;
+}
+
+function setMeter(id, v) {
+  const el = $(id); if (!el) return;
+  v = clamp(isFinite(v) ? v : 0, -1, 1);
+  el.className = v >= 0 ? 'pos' : 'neg';
+  el.style.left = (v >= 0 ? 50 : 50 + v * 50) + '%';
+  el.style.width = Math.abs(v) * 50 + '%';
+}
+
+function setPbar(id, p) {
+  const el = $(id); if (!el) return;
+  el.style.width = (p == null || !isFinite(p) ? 50 : clamp(p, 0, 1) * 100) + '%';
+}
+
+function colorize(el, v) {
+  el.classList.toggle('up-c', v > 0);
+  el.classList.toggle('down-c', v < 0);
+}
+
+// ---------- Binance ----------
+async function fetchJson(url, timeout = 8000) {
+  const ctl = new AbortController();
+  const id = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(id); }
+}
+
+async function binance(path) {
+  let lastErr;
+  for (const b of [S.restBase, ...REST_BASES.filter(x => x !== S.restBase)]) {
+    try { const j = await fetchJson(b + path); S.restBase = b; return j; } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+const parseKline = k => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], tbv: +k[9] });
+
+async function getKlines(limit, endTime) {
+  const q = `/api/v3/klines?symbol=${SYMBOL}&interval=1m&limit=${limit}` + (endTime ? `&endTime=${endTime}` : '');
+  return (await binance(q)).map(parseKline);
+}
+
+function mergeKlines(fresh) {
+  const m = new Map(S.klines.map(c => [c.t, c]));
+  for (const c of fresh) m.set(c.t, c);
+  S.klines = [...m.values()].sort((a, b) => a.t - b.t).slice(-400);
+}
+
+function upsertKline(c) {
+  const a = S.klines;
+  for (let i = a.length - 1; i >= Math.max(0, a.length - 3); i--) {
+    if (a[i].t === c.t) { a[i] = c; return; }
+    if (a[i].t < c.t) break;
+  }
+  if (!a.length || c.t > a[a.length - 1].t) { a.push(c); if (a.length > 400) a.splice(0, a.length - 400); }
+}
+
+async function refreshKlines(limit = 400) {
+  try {
+    mergeKlines(await getKlines(limit));
+    if (S.price == null && S.klines.length) S.price = S.klines[S.klines.length - 1].c;
+    return true;
+  } catch (e) {
+    setConn('err', 'Binance niet bereikbaar (' + e.message + ') — opnieuw proberen…');
+    return false;
+  }
+}
+
+function connectWs() {
+  const base = WS_BASES[S.wsIdx % WS_BASES.length];
+  const s = SYMBOL.toLowerCase();
+  let ws;
+  try { ws = new WebSocket(`${base}/stream?streams=${s}@aggTrade/${s}@kline_1m/${s}@depth20@100ms`); }
+  catch (e) { scheduleReconnect(); return; }
+  S.ws = ws;
+  ws.onopen = () => {
+    S.wsFails = 0;
+    S.lastMsg = Date.now();
+    setConn('live', 'Live (Binance)');
+    refreshKlines();               // gaten opvullen na een onderbreking
+  };
+  ws.onmessage = ev => {
+    if (S.ws !== ws) return;
+    S.lastMsg = Date.now();
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    const d = m.data; if (!d || !m.stream) return;
+    if (m.stream.endsWith('@aggTrade')) onTrade(d);
+    else if (m.stream.includes('@kline')) onKline(d.k);
+    else onDepth(d);
+  };
+  ws.onclose = () => {
+    if (S.ws !== ws) return;
+    S.ws = null;
+    setConn('warn', 'Verbinding weg — opnieuw verbinden…');
+    scheduleReconnect();
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+function scheduleReconnect() {
+  S.wsFails++; S.wsIdx++;
+  clearTimeout(S.reconnectTimer);
+  S.reconnectTimer = setTimeout(connectWs, Math.min(30000, 1000 * 2 ** Math.min(S.wsFails, 5)));
+}
+
+function onTrade(d) {
+  const t = { t: d.T, p: +d.p, q: +d.q, buy: !d.m };   // m = koper is maker -> agressieve verkoper
+  S.price = t.p;
+  S.trades.push(t);
+  const w = winStart(t.t);
+  if (!S.winFirstTrade || S.winFirstTrade.ws !== w) S.winFirstTrade = { ws: w, t: t.t, p: t.p };
+  if (t.p * t.q >= BIG_TRADE_USD) {
+    S.bigTrades.unshift(t);
+    if (S.bigTrades.length > 15) S.bigTrades.length = 15;
+  }
+  const last = S.klines[S.klines.length - 1];
+  if (last && t.t >= last.t && t.t < last.t + MIN) {
+    last.c = t.p;
+    if (t.p > last.h) last.h = t.p;
+    if (t.p < last.l) last.l = t.p;
+  }
+}
+
+function onKline(k) {
+  const c = { t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, tbv: +k.V };
+  upsertKline(c);
+  if (k.x) appendHist(c);
+  if (S.price == null) S.price = c.c;
+}
+
+function onDepth(d) {
+  const bids = d.bids || d.b, asks = d.asks || d.a;
+  if (!bids || !asks || !bids.length || !asks.length) return;
+  const bb = +bids[0][0], ba = +asks[0][0], mid = (bb + ba) / 2, range = mid * 0.0005;
+  let bq = 0, aq = 0;
+  for (const [p, q] of bids) if (mid - p <= range) bq += +q;
+  for (const [p, q] of asks) if (p - mid <= range) aq += +q;
+  const imb = bq + aq ? (bq - aq) / (bq + aq) : 0;
+  S.book = { bq, aq, imb };
+  S.bookEma = S.bookEma == null ? imb : 0.98 * S.bookEma + 0.02 * imb;   // ~5 s gladgestreken
+}
+
+function pruneTrades(now) {
+  const cutoff = now - 5 * MIN;
+  let i = 0;
+  while (i < S.trades.length && S.trades[i].t < cutoff) i++;
+  if (i) S.trades.splice(0, i);
+}
+
+async function watchdog() {
+  const silent = Date.now() - S.lastMsg;
+  if (S.ws && S.ws.readyState === WebSocket.OPEN && silent > 15000) { try { S.ws.close(); } catch {} }
+  if (silent > 10000) {                       // geen live data: val terug op REST
+    if (await refreshKlines(5)) {
+      try { S.price = +(await binance(`/api/v3/ticker/price?symbol=${SYMBOL}`)).price; } catch {}
+      if (Date.now() - S.lastMsg > 10000) setConn('warn', 'Geen live stream — data via REST (elke 5 s)');
+    }
+  }
+}
+
+// ---------- Historie (7 dagen) voor "vergelijkbaar" en modelcheck ----------
+async function loadHistory() {
+  const need = HIST_DAYS * 24 * 60;
+  const all = [];
+  let end = Date.now();
+  try {
+    while (all.length < need) {
+      const batch = await getKlines(1000, end);
+      if (!batch.length) break;
+      all.unshift(...batch);
+      end = batch[0].t - 1;
+      $('calibSum').textContent = `Historie laden… ${Math.min(100, Math.round(all.length / need * 100))}%`;
+    }
+    const now = Date.now();
+    S.hist.candles = all.filter(c => c.t + MIN <= now);
+    S.hist.loading = false;
+    rebuildSamples();
+    renderCalib();
+  } catch (e) {
+    S.hist.loading = false;
+    S.hist.error = e.message;
+    $('calibSum').textContent = 'Historie kon niet geladen worden (' + e.message + ').';
+  }
+}
+
+function appendHist(c) {
+  const h = S.hist.candles;
+  if (S.hist.loading) return;
+  if (!h.length || c.t > h[h.length - 1].t) h.push(c);
+}
+
+// Voor elk venster en elke minuut: z-score op dat moment + of het venster UP eindigde.
+function rebuildSamples() {
+  const c = S.hist.candles;
+  if (c.length < 200) return;
+  const sig = new Array(c.length).fill(null);
+  let v = null;
+  for (let i = 1; i < c.length; i++) {
+    const r = Math.log(c[i].c / c[i - 1].c);
+    if (i <= 30) { v = (v || 0) + r * r / 30; continue; }
+    v = EWMA_LAMBDA * v + (1 - EWMA_LAMBDA) * r * r;
+    sig[i] = Math.max(Math.sqrt(v), SIGMA_FLOOR);
+  }
+  const samples = [];
+  for (let i = 120; i + 14 < c.length; i++) {
+    if (c[i].t % WIN !== 0) continue;
+    if (c[i + 14].t !== c[i].t + 14 * MIN) continue;   // gat in de data
+    const open = c[i].o, up = c[i + 14].c >= open;
+    samples.push({ k: 0, z: 0, up });
+    for (let k = 1; k <= 14; k++) {
+      const s = sig[i + k - 1];
+      if (!s) continue;
+      samples.push({ k, z: Math.log(c[i + k - 1].c / open) / (s * Math.sqrt(15 - k)), up });
+    }
+  }
+  S.hist.samples = samples;
+}
+
+function analogue(k, z) {
+  const sm = S.hist.samples;
+  if (!sm.length) return null;
+  if (k <= 0) {
+    let n = 0, up = 0;
+    for (const s of sm) if (s.k === 0) { n++; if (s.up) up++; }
+    return { n, up, p: n ? up / n : null, base: true };
+  }
+  for (const tol of [0.2, 0.35, 0.5]) {
+    let n = 0, up = 0;
+    for (const s of sm) if (s.k > 0 && Math.abs(s.k - k) <= 1 && Math.abs(s.z - z) <= tol) { n++; if (s.up) up++; }
+    if (n >= 40 || tol === 0.5) return { n, up, p: n ? up / n : null, tol };
+  }
+}
+
+function baseRate() {
+  let n = 0, up = 0;
+  for (const s of S.hist.samples) if (s.k === 0) { n++; if (s.up) up++; }
+  return n ? { n, p: up / n } : null;
+}
+
+// ---------- Polymarket ----------
+const parseMaybeJson = x => typeof x === 'string' ? JSON.parse(x) : x;
+
+async function loadPolymarket(ws) {
+  const slug = `btc-updown-15m-${ws / 1000}`;
+  const pm = S.pm = { ws, slug, url: `https://polymarket.com/event/${slug}`, status: 'laden', tokens: null, up: null, down: null, priceToBeat: null };
+  try {
+    const arr = await fetchJson(`${PM_GAMMA}/events?slug=${slug}`);
+    const ev = Array.isArray(arr) ? arr[0] : arr;
+    if (!ev || !ev.markets || !ev.markets.length) throw new Error('markt niet gevonden');
+    const m = ev.markets[0];
+    const outcomes = parseMaybeJson(m.outcomes) || [];
+    const prices = parseMaybeJson(m.outcomePrices) || [];
+    const tokens = parseMaybeJson(m.clobTokenIds) || [];
+    const iUp = outcomes.findIndex(o => /^up$/i.test(o)), iDown = outcomes.findIndex(o => /^down$/i.test(o));
+    if (iUp < 0 || iDown < 0) throw new Error('onbekende uitkomsten');
+    if (S.pm !== pm) return;
+    pm.tokens = { up: tokens[iUp], down: tokens[iDown] };
+    pm.up = { mid: +prices[iUp] || null };
+    pm.down = { mid: +prices[iDown] || null };
+    const ptb = [ev.eventMetadata, m.eventMetadata, ev, m]
+      .map(o => o && +(o.priceToBeat ?? o.referencePrice))
+      .find(v => isFinite(v) && v > 0);
+    if (ptb) pm.priceToBeat = ptb;
+    pm.status = 'ok';
+    await pollPolymarketBook();
+  } catch (e) {
+    if (S.pm === pm) { pm.status = 'fout'; pm.err = e.message; }
+  }
+}
+
+function bookTop(b, prev) {
+  const bids = (b.bids || []).map(x => +x.price).filter(isFinite);
+  const asks = (b.asks || []).map(x => +x.price).filter(isFinite);
+  const bid = bids.length ? Math.max(...bids) : null;
+  const ask = asks.length ? Math.min(...asks) : null;
+  const mid = bid != null && ask != null ? (bid + ask) / 2 : (prev && prev.mid) || null;
+  return { bid, ask, mid };
+}
+
+async function pollPolymarketBook() {
+  const pm = S.pm;
+  if (!pm || !pm.tokens || !pm.tokens.up || !pm.tokens.down) return;
+  try {
+    const [bu, bd] = await Promise.all([pm.tokens.up, pm.tokens.down].map(id => fetchJson(`${PM_CLOB}/book?token_id=${id}`, 5000)));
+    if (S.pm !== pm) return;
+    pm.up = bookTop(bu, pm.up);
+    pm.down = bookTop(bd, pm.down);
+    pm.updated = Date.now();
+  } catch (e) { pm.bookErr = e.message; }
+}
+
+// Wat kost het om UP / DOWN te kopen? Eigen invoer gaat voor.
+function pmCost(side) {
+  if (S.manualPm[side] != null) return S.manualPm[side];
+  const pm = S.pm;
+  if (!pm || pm.ws !== S.curWs || !pm[side]) return null;
+  return pm[side].ask ?? pm[side].mid ?? null;
+}
+
+// ---------- Analyse ----------
+function currentOpen(ws) {
+  if (S.manualOpen[ws] != null) return { px: S.manualOpen[ws], src: 'handmatig ingevuld' };
+  const k = S.klines.find(c => c.t === ws);
+  const binOpen = k ? k.o : (S.winFirstTrade && S.winFirstTrade.ws === ws && S.winFirstTrade.t - ws < 5000 ? S.winFirstTrade.p : null);
+  const pm = S.pm;
+  if (pm && pm.ws === ws && pm.priceToBeat && (!binOpen || Math.abs(pm.priceToBeat / binOpen - 1) < 0.02)) {
+    return { px: pm.priceToBeat, src: 'Polymarket (Chainlink)' };
+  }
+  if (binOpen) return { px: binOpen, src: k ? 'open van Binance-candle' : 'eerste Binance-trade' };
+  return null;
+}
+
+function computeSignals(now) {
+  const k = S.klines;
+  if (k.length < 60) return null;
+  const closes = k.slice(0, -1).map(c => c.c);         // laatste candle loopt nog
+  const price = S.price ?? k[k.length - 1].c;
+  const sigma = ewmaSigma(closes.slice(-240));
+  if (!sigma) return null;
+
+  // order flow laatste 60 s uit live trades (anders uit de lopende candle)
+  const from = now - 60000;
+  let b1 = 0, s1 = 0;
+  for (let i = S.trades.length - 1; i >= 0; i--) {
+    const t = S.trades[i];
+    if (t.t < from) break;
+    if (t.buy) b1 += t.q; else s1 += t.q;
+  }
+  let flow1;
+  if (S.trades.length && S.trades[0].t <= from + 5000 && b1 + s1 > 0) flow1 = (b1 - s1) / (b1 + s1);
+  else { const c = k[k.length - 1]; flow1 = c.v ? (2 * c.tbv - c.v) / c.v : 0; }
+
+  let bv = 0, tv = 0;
+  for (const c of k.slice(-5)) { bv += c.tbv; tv += c.v; }
+  const flow5 = tv ? (2 * bv - tv) / tv : 0;
+
+  const ws = winStart(now);
+  let wDelta = 0, wVol = 0, pv = 0;
+  for (const c of k) if (c.t >= ws) { wDelta += 2 * c.tbv - c.v; wVol += c.v; pv += (c.h + c.l + c.c) / 3 * c.v; }
+  const vwap = wVol ? pv / wVol : null;
+
+  const momZ = Math.log(price / closes[closes.length - 5]) / (sigma * Math.sqrt(5));
+  const e9 = ema(closes.slice(-60).concat(price), 9);
+  const e21 = ema(closes.slice(-90).concat(price), 21);
+  const trendZ = Math.log(e9 / e21) / sigma;
+  const r = rsi(closes.slice(-120).concat(price), 14);
+
+  const sig = {
+    flow1: Math.tanh(flow1 * 2.5),
+    flow5: Math.tanh(flow5 * 3),
+    book: Math.tanh((S.bookEma ?? 0) * 1.5),
+    mom: Math.tanh(momZ / 1.5),
+    trend: Math.tanh(trendZ / 3),
+    rsi: r == null ? 0 : r > 70 ? -clamp((r - 70) / 20, 0, 1) : r < 30 ? clamp((30 - r) / 20, 0, 1) : 0,
+  };
+  let score = 0;
+  for (const key in WEIGHTS) score += WEIGHTS[key] * sig[key];
+  return { price, sigma, flow1, flow5, wDelta, wVol, vwap, momZ, trendZ, rsi: r, sig, score };
+}
+
+function analyze(now) {
+  const ws = winStart(now), we = ws + WIN;
+  const a = { ws, we, minsLeft: (we - now) / MIN, sg: computeSignals(now), op: currentOpen(ws) };
+  if (a.sg) a.pNext = Phi(NEXT_K * a.sg.score);
+  if (!a.sg || !a.op) return a;
+  a.z = zScore(a.sg.price, a.op.px, a.sg.sigma, a.minsLeft);
+  a.pStat = soften(Phi(a.z));
+  a.pSig = soften(Phi(a.z + SIGNAL_K * a.sg.score));
+  return a;
+}
+
+// ---------- Track record (localStorage) ----------
+function trLoad() { try { return JSON.parse(localStorage.getItem(TR_KEY)) || []; } catch { return []; } }
+function trSave() { try { localStorage.setItem(TR_KEY, JSON.stringify(S.track.slice(-300))); } catch {} }
+
+function findCandle(t) {
+  return S.klines.find(c => c.t === t) || S.hist.candles.find(c => c.t === t) || null;
+}
+
+function trackTick(now, a) {
+  if (a.pSig == null) return;
+  const elapsed = (now - a.ws) / MIN;
+  for (const cp of CHECKPOINTS) {
+    if (elapsed < cp || elapsed >= cp + 0.5) continue;
+    let e = S.track.find(x => x.ws === a.ws);
+    if (!e) { e = { ws: a.ws, open: a.op.px, p: {} }; S.track.push(e); }
+    if (e.p[cp] == null) { e.p[cp] = Math.round(a.pSig * 1e4) / 1e4; e.open = a.op.px; trSave(); }
+  }
+}
+
+function resolveTrack(now) {
+  let changed = false;
+  for (const x of S.track) {
+    if (x.res || now < x.ws + WIN + 3000) continue;
+    const c = findCandle(x.ws + 14 * MIN);
+    if (c) { x.close = c.c; x.res = c.c >= x.open ? 'UP' : 'DOWN'; changed = true; }
+    else if (!S.hist.loading && now - x.ws > (HIST_DAYS - 1) * 24 * 60 * MIN) { x.res = 'onbekend'; changed = true; }
+  }
+  if (changed) trSave();
+}
+
+// ---------- Weergave ----------
+function renderHero(a, now) {
+  $('winLabel').textContent = `${fmtTime(a.ws)} – ${fmtTime(a.we)}`;
+  $('winEt').textContent = `Polymarket (ET): ${fmtEt(a.ws)} – ${fmtEt(a.we)}`;
+  $('countdown').textContent = fmtCountdown(a.we - now);
+  $('progress').style.width = clamp((now - a.ws) / WIN * 100, 0, 100) + '%';
+
+  const price = a.sg ? a.sg.price : S.price;
+  $('price').textContent = fmtUsd(price);
+  $('openPx').textContent = a.op ? fmtUsd(a.op.px) : '–';
+  $('openSrc').textContent = a.op ? a.op.src : 'wachten op eerste candle…';
+
+  const diffEl = $('diff');
+  if (a.op && price) {
+    const d = price - a.op.px;
+    diffEl.textContent = (d >= 0 ? '+' : '−') + fmtUsd(Math.abs(d));
+    colorize(diffEl, d);
+    $('diffSigma').textContent = a.z != null ? `${fmtSigned(a.z, 2)} σ (t.o.v. resterende tijd)` : '';
+  } else { diffEl.textContent = '–'; $('diffSigma').textContent = ''; }
+
+  const p = a.pSig;
+  const up = $('barUp'), down = $('barDown');
+  if (p != null) {
+    up.style.width = clamp(p * 100, 0, 100) + '%';
+    down.style.width = clamp(100 - p * 100, 0, 100) + '%';
+    up.textContent = p >= 0.12 ? `UP ${fmtPct(p)}` : '';
+    down.textContent = p <= 0.88 ? `${fmtPct(1 - p)} DOWN` : '';
+  }
+  renderVerdict(a, price);
+}
+
+function renderVerdict(a, price) {
+  const el = $('verdict');
+  if (a.pSig == null) { el.textContent = S.klines.length ? 'Wachten op de open van dit venster…' : 'Data laden…'; return; }
+  const p = a.pSig, d = Math.abs(p - 0.5), side = p >= 0.5 ? 'UP' : 'DOWN';
+  let head;
+  if (d < 0.06) head = 'Geen duidelijke voorkeur — nu vrijwel een muntworp.';
+  else if (d < 0.15) head = `Lichte voorkeur voor ${side}.`;
+  else if (d < 0.3) head = `Duidelijke voorkeur voor ${side}.`;
+  else head = `Sterke voorkeur voor ${side}.`;
+  const notes = [];
+  if (a.minsLeft > 10) notes.push('Nog veel tijd over: de kans kan snel omslaan.');
+  const sg = a.sg;
+  if (Math.abs(sg.score) > 0.35 && Math.sign(sg.score) !== Math.sign(a.z) && Math.abs(a.z) > 0.2) {
+    notes.push(`Let op: de prijs staat ${a.z > 0 ? 'boven' : 'onder'} de open, maar de order flow/signalen wijzen de andere kant op.`);
+  }
+  el.innerHTML = '';
+  const b = document.createElement('b'); b.textContent = head;
+  b.className = d < 0.06 ? '' : side === 'UP' ? 'up-c' : 'down-c';
+  el.appendChild(b);
+  for (const n of notes) { const div = document.createElement('div'); div.className = 'small muted'; div.textContent = n; el.appendChild(div); }
+  if (price && Math.abs(price - a.op.px) < NEAR_OPEN_USD && a.op.src !== 'handmatig ingevuld' && !a.op.src.startsWith('Polymarket')) {
+    const w = document.createElement('div'); w.className = 'warnline small';
+    w.textContent = `Prijs ligt minder dan $${NEAR_OPEN_USD} van de open. Polymarket rekent met Chainlink, niet Binance — vul de echte price to beat in voor zekerheid.`;
+    el.appendChild(w);
+  }
+}
+
+function renderBreakdown(a) {
+  $('pStat').textContent = fmtPct(a.pStat); setPbar('bStat', a.pStat);
+  $('pSig').textContent = fmtPct(a.pSig); setPbar('bSig', a.pSig);
+  const an = S.analog;
+  if (an && an.p != null) {
+    const [lo, hi] = wilson(an.up, an.n);
+    $('pHist').textContent = fmtPct(an.p);
+    setPbar('bHist', an.p);
+    $('analogSub').textContent = an.base
+      ? `alle ${an.n} vensters (nog geen info in dit venster)`
+      : `${an.n} vergelijkbare momenten, marge ${fmtPct(lo, 0)}–${fmtPct(hi, 0)}`;
+  } else {
+    $('pHist').textContent = '–'; setPbar('bHist', null);
+    $('analogSub').textContent = S.hist.loading ? 'laatste 7 dagen laden…' : (S.hist.error ? 'historie niet beschikbaar' : 'te weinig vergelijkbare momenten');
+  }
+}
+
+function renderPM(a) {
+  const pm = S.pm, st = $('pmStatus');
+  st.textContent = '';
+  if (!pm || pm.status === 'laden') st.textContent = 'Polymarket-markt zoeken…';
+  else if (pm.status === 'fout') st.textContent = `Polymarket automatisch ophalen lukte niet (${pm.err}). Vul de prijzen hieronder zelf in.`;
+  else {
+    const link = document.createElement('a');
+    link.href = pm.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Open markt op Polymarket';
+    st.append(pm.updated ? `Live, bijgewerkt ${Math.round((Date.now() - pm.updated) / 1000)} s geleden · ` : 'Gevonden · ', link);
+  }
+  const fmtSide = s => s ? `${cents(s.bid)} / ${cents(s.ask)}` + (s.bid == null && s.ask == null ? ` (mid ${cents(s.mid)})` : '') : '–';
+  $('pmUp').textContent = pm && pm.ws === a.ws ? fmtSide(pm.up) : '–';
+  $('pmDown').textContent = pm && pm.ws === a.ws ? fmtSide(pm.down) : '–';
+
+  const edgeEl = $('edge');
+  const p = a.pSig, cu = pmCost('up'), cd = pmCost('down');
+  if (p == null || (cu == null && cd == null)) { edgeEl.textContent = 'Zodra er een kans én een Polymarket-prijs is, zie je hier of UP of DOWN goedkoop of duur is.'; return; }
+  const lines = [];
+  if (cu != null) lines.push({ side: 'UP', p, cost: cu });
+  if (cd != null) lines.push({ side: 'DOWN', p: 1 - p, cost: cd });
+  edgeEl.innerHTML = '';
+  for (const l of lines) {
+    const ev = l.p / l.cost - 1;      // verwachte winst per $1 inzet
+    const div = document.createElement('div');
+    const strong = document.createElement('b');
+    strong.textContent = `${l.side}: `;
+    strong.className = l.side === 'UP' ? 'up-c' : 'down-c';
+    div.append(strong, `kost ${cents(l.cost)}, model ${fmtPct(l.p)} → verwachte waarde ${ev >= 0 ? '+' : '−'}${Math.abs(ev * 100).toFixed(1)}% per inzet`);
+    edgeEl.appendChild(div);
+  }
+  const best = lines.map(l => ({ ...l, edge: l.p - l.cost })).sort((x, y) => y.edge - x.edge)[0];
+  const note = document.createElement('div');
+  note.className = 'small muted';
+  note.style.marginTop = '4px';
+  note.textContent = best.edge > 0.07
+    ? `Volgens het model is ${best.side} ${Math.round(best.edge * 100)} procentpunt te goedkoop. Het model kan zelf ±5–10 punt ernaast zitten.`
+    : 'Geen duidelijk verschil tussen model en markt (< 7 procentpunt) — na spread en fees meestal geen voordeel.';
+  edgeEl.appendChild(note);
+}
+
+function renderFlow(a) {
+  const sg = a.sg; if (!sg) return;
+  setMeter('mFlow1', sg.flow1 * 2.5); $('vFlow1').textContent = fmtPct((1 + sg.flow1) / 2, 0) + ' koop';
+  setMeter('mFlow5', sg.flow5 * 3); $('vFlow5').textContent = fmtPct((1 + sg.flow5) / 2, 0) + ' koop';
+  setMeter('mDelta', sg.wVol ? sg.wDelta / sg.wVol * 3 : 0);
+  $('vDelta').textContent = fmtSigned(sg.wDelta, 1) + ' BTC';
+  colorize($('vDelta'), sg.wDelta);
+  if (S.book) {
+    setMeter('mBook', S.bookEma * 1.5);
+    $('vBook').textContent = fmtPct((1 + S.bookEma) / 2, 0) + ' bied';
+    $('bookSub').textContent = `${S.book.bq.toFixed(1)} BTC bied vs ${S.book.aq.toFixed(1)} BTC aanbod`;
+  }
+  const ul = $('bigTrades');
+  if (S.bigTrades.length) {
+    ul.innerHTML = '';
+    for (const t of S.bigTrades) {
+      const li = document.createElement('li');
+      const l = document.createElement('span'); l.className = t.buy ? 'up-c' : 'down-c'; l.textContent = (t.buy ? 'KOOP ' : 'VERKOOP ') + t.q.toFixed(2) + ' BTC';
+      const r = document.createElement('span'); r.className = 'mono muted'; r.textContent = `${fmtUsd(t.p * t.q, 0)} @ ${fmtUsd(t.p, 0)} · ${new Date(t.t).toLocaleTimeString('nl-NL')}`;
+      li.append(l, r); ul.appendChild(li);
+    }
+  }
+}
+
+function renderIndicators(a) {
+  const sg = a.sg; if (!sg) return;
+  setMeter('mMom', sg.sig.mom); $('vMom').textContent = fmtSigned(sg.momZ, 2) + ' σ';
+  setMeter('mTrend', sg.sig.trend); $('vTrend').textContent = sg.trendZ >= 0 ? 'stijgend' : 'dalend';
+  setMeter('mRsi', sg.sig.rsi); $('vRsi').textContent = sg.rsi == null ? '–' : sg.rsi.toFixed(0);
+  const vw = $('vVwap');
+  if (sg.vwap) { const d = sg.price - sg.vwap; vw.textContent = (d >= 0 ? 'boven ' : 'onder ') + fmtUsd(Math.abs(d), 0); colorize(vw, d); }
+  else vw.textContent = '–';
+  $('vVol').textContent = '±' + fmtUsd(sg.price * sg.sigma * Math.sqrt(15), 0);
+  setMeter('mScore', sg.score); $('vScore').textContent = fmtSigned(sg.score, 2);
+  colorize($('vScore'), sg.score);
+}
+
+function renderNext(a, now) {
+  $('nextLabel').textContent = `${fmtTime(a.we)} – ${fmtTime(a.we + WIN)}`;
+  $('nextStart').textContent = `Start over ${fmtCountdown(a.we - now)} · Polymarket (ET): ${fmtEt(a.we)} – ${fmtEt(a.we + WIN)}`;
+  $('pNext').textContent = fmtPct(a.pNext); setPbar('bNext', a.pNext);
+  const br = baseRate();
+  $('pBase').textContent = br ? fmtPct(br.p) : '–'; setPbar('bBase', br && br.p);
+}
+
+function renderRecent(now) {
+  const rows = [];
+  const cur = winStart(now);
+  for (let i = 1; i <= 8; i++) {
+    const ws = cur - i * WIN;
+    const o = S.klines.find(c => c.t === ws), c = S.klines.find(c => c.t === ws + 14 * MIN);
+    if (!o || !c) continue;
+    const d = c.c - o.o, up = d >= 0;
+    rows.push(`<tr><td class="mono">${fmtTime(ws)}–${fmtTime(ws + WIN)}</td><td class="mono">${fmtUsd(o.o, 0)}</td><td class="mono">${fmtUsd(c.c, 0)}</td><td class="mono ${up ? 'up-c' : 'down-c'}">${sign(d)}${Math.abs(d).toFixed(0)}</td><td><span class="chip ${up ? 'up' : 'down'}">${up ? 'UP' : 'DOWN'}</span></td></tr>`);
+  }
+  $('recent').innerHTML = rows.join('') || '<tr><td colspan="5" class="muted">Laden…</td></tr>';
+}
+
+function renderTrack() {
+  const list = S.track.slice(-12).reverse();
+  const known = res => res === 'UP' || res === 'DOWN';
+  const cell = (p, res) => {
+    if (p == null) return '<td class="muted">–</td>';
+    if (!known(res)) return `<td class="mono">${fmtPct(p, 0)}</td>`;
+    const hit = (p >= 0.5) === (res === 'UP');
+    return `<td class="mono ${hit ? 'ok' : 'bad'}">${fmtPct(p, 0)} ${hit ? '✓' : '✗'}</td>`;
+  };
+  const resCell = res => known(res) ? `<span class="chip ${res === 'UP' ? 'up' : 'down'}">${res}</span>` : `<span class="muted">${res ? 'onbekend' : 'loopt'}</span>`;
+  $('track').innerHTML = list.map(e => `<tr><td class="mono">${new Date(e.ws).toLocaleDateString('nl-NL', { day: 'numeric', month: 'numeric' })} ${fmtTime(e.ws)}</td>${CHECKPOINTS.map(cp => cell(e.p[cp], e.res)).join('')}<td>${resCell(e.res)}</td></tr>`).join('');
+  const done = S.track.filter(e => known(e.res));
+  if (!done.length) return;
+  const parts = CHECKPOINTS.map(cp => {
+    const xs = done.filter(e => e.p[cp] != null);
+    if (!xs.length) return null;
+    const hits = xs.filter(e => (e.p[cp] >= 0.5) === (e.res === 'UP')).length;
+    const brier = xs.reduce((s, e) => s + (e.p[cp] - (e.res === 'UP' ? 1 : 0)) ** 2, 0) / xs.length;
+    return `na ${cp}m: ${hits}/${xs.length} goed (${fmtPct(hits / xs.length, 0)}), Brier ${brier.toFixed(3)}`;
+  }).filter(Boolean);
+  $('trackSum').textContent = parts.join(' · ') + '  (Brier: lager is beter, 0,25 = gokken)';
+}
+
+function renderCalib() {
+  const sm = S.hist.samples;
+  if (!sm.length) return;
+  const buckets = Array.from({ length: 10 }, () => ({ n: 0, up: 0, ps: 0 }));
+  let brier = 0, n = 0;
+  const byK = {};
+  for (const s of sm) {
+    if (s.k === 0) continue;
+    const p = soften(Phi(s.z)), y = s.up ? 1 : 0;
+    const b = buckets[Math.min(9, Math.floor(p * 10))];
+    b.n++; b.up += y; b.ps += p;
+    brier += (p - y) ** 2; n++;
+    const kk = byK[s.k] || (byK[s.k] = { n: 0, hit: 0 });
+    kk.n++; if ((p >= 0.5) === s.up) kk.hit++;
+  }
+  const windows = sm.filter(s => s.k === 0).length;
+  $('calibSum').textContent = `${windows} vensters, ${n} momenten. Brier-score ${(brier / n).toFixed(3)} (lager is beter; 0,25 = gokken). Klopt het model, dan liggen "gem." en "werkelijk UP" dicht bij elkaar.`;
+  $('calib').innerHTML = buckets.map((b, i) => b.n ? `<tr><td class="mono">${i * 10}–${i * 10 + 10}%</td><td class="mono">${fmtPct(b.ps / b.n)}</td><td class="mono">${fmtPct(b.up / b.n)}</td><td class="mono muted">${b.n}</td></tr>` : '').join('');
+  const ks = [1, 3, 5, 7, 10, 12, 14].filter(k => byK[k]);
+  $('hitHead').innerHTML = '<th>minuut</th>' + ks.map(k => `<th>${k}</th>`).join('');
+  $('hitRow').innerHTML = '<td class="muted">goed</td>' + ks.map(k => `<td class="mono">${fmtPct(byK[k].hit / byK[k].n, 0)}</td>`).join('');
+}
+
+function drawChart(a) {
+  const cv = $('chart');
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const col = { text: cssVar('--muted'), grid: cssVar('--grid'), up: cssVar('--up'), down: cssVar('--down'), accent: cssVar('--accent'), win: cssVar('--win-bg'), upSoft: cssVar('--up-soft'), downSoft: cssVar('--down-soft'), panel: cssVar('--panel') };
+
+  const now = Date.now(), ws = a.ws, we = a.we;
+  const back = w < 500 ? 25 : 45;
+  const tStart = ws - back * MIN, tEnd = we;
+  const cs = S.klines.filter(c => c.t >= tStart && c.t < tEnd);
+  if (!cs.length) return;
+  const price = a.sg ? a.sg.price : S.price, open = a.op && a.op.px, sigma = a.sg && a.sg.sigma;
+
+  let lo = Infinity, hi = -Infinity;
+  for (const c of cs) { lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
+  let cone = null;
+  if (price && sigma && now < we) {
+    cone = [];
+    const T = (we - now) / MIN;
+    for (let i = 0; i <= 30; i++) {
+      const tau = T * i / 30, sd = sigma * Math.sqrt(tau);
+      cone.push([now + tau * MIN, price * Math.exp(sd), price * Math.exp(-sd)]);
+    }
+    hi = Math.max(hi, cone[30][1]); lo = Math.min(lo, cone[30][2]);
+  }
+  if (open) { hi = Math.max(hi, open); lo = Math.min(lo, open); }
+  const pad = (hi - lo) * 0.08 || 20; hi += pad; lo -= pad;
+
+  const padL = 4, padR = 72, padT = 8, padB = 22;
+  const X = t => padL + (t - tStart) / (tEnd - tStart) * (w - padL - padR);
+  const Y = p => padT + (hi - p) / (hi - lo) * (h - padT - padB);
+
+  ctx.fillStyle = col.win;
+  ctx.fillRect(X(ws), padT, X(we) - X(ws), h - padT - padB);
+
+  ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = col.grid; ctx.fillStyle = col.text; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const step = niceStep((hi - lo) / 5);
+  for (let p = Math.ceil(lo / step) * step; p <= hi; p += step) {
+    const y = Math.round(Y(p)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    ctx.fillText(p.toLocaleString('en-US', { maximumFractionDigits: step < 1 ? 2 : 0 }), w - padR + 6, y);
+  }
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
+  for (let t = Math.ceil(tStart / WIN) * WIN; t <= tEnd; t += WIN) {
+    const x = Math.round(X(t)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
+    ctx.fillText(fmtTime(t), clamp(x, 18, w - padR - 18), h - 6);
+  }
+  ctx.textAlign = 'left';
+
+  if (cone) {
+    ctx.beginPath();
+    cone.forEach(([t, u], i) => i ? ctx.lineTo(X(t), Y(u)) : ctx.moveTo(X(t), Y(u)));
+    for (let i = cone.length - 1; i >= 0; i--) ctx.lineTo(X(cone[i][0]), Y(cone[i][2]));
+    ctx.closePath();
+    ctx.fillStyle = !open || price >= open ? col.upSoft : col.downSoft;
+    ctx.fill();
+  }
+
+  const bw = Math.max(1, (X(MIN) - X(0)) * 0.7);
+  for (const c of cs) {
+    const x = X(c.t + MIN / 2), up = c.c >= c.o;
+    ctx.strokeStyle = ctx.fillStyle = up ? col.up : col.down;
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, Y(c.h)); ctx.lineTo(Math.round(x) + 0.5, Y(c.l)); ctx.stroke();
+    const y1 = Y(Math.max(c.o, c.c)), y2 = Y(Math.min(c.o, c.c));
+    ctx.fillRect(x - bw / 2, y1, bw, Math.max(1, y2 - y1));
+  }
+
+  const tag = (y, text, bg) => {
+    ctx.fillStyle = bg;
+    ctx.fillRect(w - padR + 1, y - 9, padR - 2, 18);
+    ctx.fillStyle = col.panel; ctx.textBaseline = 'middle';
+    ctx.fillText(text, w - padR + 5, y);
+  };
+  if (open) {
+    const y = Math.round(Y(open)) + 0.5;
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = col.accent;
+    ctx.beginPath(); ctx.moveTo(X(ws), y); ctx.lineTo(w - padR, y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = col.accent; ctx.textBaseline = 'bottom';
+    ctx.fillText('price to beat', X(ws) + 4, y - 3);
+    tag(y, open.toLocaleString('en-US', { maximumFractionDigits: 0 }), col.accent);
+  }
+  if (price) {
+    const y = Math.round(Y(price)) + 0.5;
+    const c = !open || price >= open ? col.up : col.down;
+    ctx.strokeStyle = c; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke(); ctx.globalAlpha = 1;
+    tag(y, price.toLocaleString('en-US', { maximumFractionDigits: 0 }), c);
+  }
+}
+
+// ---------- Hoofdlus ----------
+function onNewWindow(ws) {
+  const first = S.curWs == null;
+  S.curWs = ws;
+  S.manualPm = { up: null, down: null };
+  $('pmUpIn').value = ''; $('pmDownIn').value = '';
+  if (!first) { $('openInput').value = ''; rebuildSamples(); renderCalib(); }
+  loadPolymarket(ws);
+}
+
+function tick() {
+  const now = Date.now();
+  const ws = winStart(now);
+  if (S.curWs !== ws) onNewWindow(ws);
+  const a = analyze(now);
+  S.last = a;
+  renderHero(a, now);
+  renderBreakdown(a);
+  renderPM(a);
+  renderFlow(a);
+  renderIndicators(a);
+  renderNext(a, now);
+  drawChart(a);
+  trackTick(now, a);
+}
+
+function slowTick() {
+  const now = Date.now();
+  pruneTrades(now);
+  const a = S.last;
+  S.analog = a && a.z != null ? analogue(clamp(Math.round(15 - a.minsLeft), 0, 14), a.z) : analogue(0, 0);
+  resolveTrack(now);
+  renderRecent(now);
+  renderTrack();
+}
+
+function wireUi() {
+  const setOpen = () => {
+    const v = parsePrice($('openInput').value);
+    if (v) S.manualOpen[winStart(Date.now())] = v;
+  };
+  $('openSet').onclick = setOpen;
+  $('openInput').addEventListener('keydown', e => { if (e.key === 'Enter') setOpen(); });
+  $('openReset').onclick = () => { delete S.manualOpen[winStart(Date.now())]; $('openInput').value = ''; };
+  $('pmUpIn').addEventListener('input', e => { S.manualPm.up = parseCents(e.target.value); });
+  $('pmDownIn').addEventListener('input', e => { S.manualPm.down = parseCents(e.target.value); });
+  $('trackClear').onclick = () => { if (confirm('Track record in deze browser wissen?')) { S.track = []; trSave(); renderTrack(); $('trackSum').textContent = 'Gewist.'; } };
+}
+
+async function init() {
+  S.track = trLoad();
+  wireUi();
+  setConn('warn', 'Data laden…');
+  if (await refreshKlines(400)) setConn('warn', 'Verbinden met live stream…');
+  connectWs();
+  tick(); slowTick();
+  setInterval(tick, 500);
+  setInterval(slowTick, 2000);
+  setInterval(watchdog, 5000);
+  setInterval(pollPolymarketBook, 4000);
+  loadHistory();
+}
+
+init();
+})();
+</script>
+</body>
+</html>
