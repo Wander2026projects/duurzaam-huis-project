@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BTC 15-min Analyzer</title>
+<title>BTC Up/Down Analyzer</title>
 <style>
 :root {
   --bg: #f3f4f6; --panel: #ffffff; --panel-2: #eef0f3; --text: #14171c; --muted: #5b6472; --border: #dde1e7;
@@ -90,6 +90,21 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .explain ul { padding-left: 18px; margin: 6px 0; }
 .explain strong { color: var(--text); }
 a { color: var(--accent); }
+.tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; background: var(--panel); }
+.tabs button { border: 0; border-radius: 0; padding: 6px 14px; background: transparent; color: var(--muted); font-weight: 600; }
+.tabs button.on { background: var(--accent); color: var(--panel); }
+.headleft { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.signal { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; padding: 12px 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border); }
+.signal .head { font-size: 22px; font-weight: 750; }
+.signal.buy-up { background: var(--up-soft); border-color: var(--up); }
+.signal.buy-down { background: var(--down-soft); border-color: var(--down); }
+.signal.almost { border-color: var(--warn); }
+.checks { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; }
+.checks li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; font-size: 13px; }
+.settings label { display: inline-flex; align-items: center; gap: 4px; }
+.settings input[type=text] { width: 56px; }
+select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font: inherit; }
+tr.best td { background: var(--up-soft); }
 .pgrid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .pgrid > div { min-width: 0; }
 td.wrap { white-space: normal; text-align: left; }
@@ -97,7 +112,12 @@ td.wrap { white-space: normal; text-align: left; }
 </head>
 <body>
 <header>
-  <h1>BTC 15-min Up/Down Analyzer</h1>
+  <div class="headleft">
+    <h1 id="appTitle">BTC Up/Down Analyzer</h1>
+    <div class="tabs" id="tfTabs" role="tablist" aria-label="Tijdsframe">
+      <button data-tf="5m" role="tab">5 min</button><button data-tf="15m" role="tab">15 min</button><button data-tf="1h" role="tab">1 uur</button>
+    </div>
+  </div>
   <div class="pill"><span id="connDot" class="dot"></span><span id="connText">Starten…</span></div>
 </header>
 
@@ -133,6 +153,32 @@ td.wrap { white-space: normal; text-align: left; }
     </details>
   </section>
 
+  <!-- Koopadvies -->
+  <section class="card wide">
+    <h2>Koopadvies — wanneer UP of DOWN kopen?</h2>
+    <div id="signal" class="signal"><span id="sigHead" class="head">Wachten…</span><span id="sigText" class="small"></span></div>
+    <div class="pgrid" style="margin-top:12px">
+      <div>
+        <div class="label">Controle — alles ✓ = koopsignaal</div>
+        <ul id="checks" class="checks"></ul>
+        <div id="adviceNums" class="edge small">–</div>
+      </div>
+      <div>
+        <div class="label">Wanneer instappen? Uit de historie (<span class="histDays">21</span> dagen), als het model minstens
+          <select id="thSel" aria-label="Zekerheid van het model"><option value="0.6">60%</option><option value="0.7">70%</option><option value="0.8">80%</option><option value="0.9">90%</option></select> zeker was:</div>
+        <div class="tablewrap"><table><thead><tr><th>Moment</th><th>hoe vaak</th><th>slagingskans</th><th>max prijs*</th><th>winst als goed*</th></tr></thead><tbody id="entryTbl"><tr><td colspan="5" class="muted">Historie laden…</td></tr></tbody></table></div>
+        <div id="entrySum" class="edge small">–</div>
+      </div>
+    </div>
+    <div class="inline small settings">
+      <span class="muted">Jouw instellingen:</span>
+      <label>min. slagingskans <input id="setMinP" type="text" inputmode="decimal">%</label>
+      <label>min. voordeel <input id="setEdge" type="text" inputmode="decimal">pt</label>
+      <label>fee + slippage <input id="setFee" type="text" inputmode="decimal">pt</label>
+    </div>
+    <p class="small muted" style="margin:8px 0 0">* <b>Max prijs</b> = slagingskans − (min. voordeel + fee): betaal je meer, dan verdien je er gemiddeld niets aan. <b>Winst als goed</b> = wat je per ingelegde $1 wint als je precies de max prijs betaalt en het uitkomt. Hoge slagingskans (laat in het venster) betekent bijna altijd een hoge prijs en dus kleine winst per keer; eerder instappen geeft meer rendement maar vaker verlies. Dit is een rekenhulp, geen financieel advies.</p>
+  </section>
+
   <!-- Chart -->
   <section class="card wide">
     <h2>Chart — 1-min candles, venster gemarkeerd, gekleurde waaier = verwachte beweging (±1σ) tot het einde</h2>
@@ -152,7 +198,7 @@ td.wrap { white-space: normal; text-align: left; }
     <h2>Kans op UP — drie invalshoeken</h2>
     <div class="row"><span>Statistisch<span class="sub">afstand tot open ÷ verwachte beweging</span></span><span class="pbar"><i id="bStat"></i></span><span id="pStat" class="val mono">–</span></div>
     <div class="row"><span>Met signalen<span id="sigSub" class="sub">+ order flow, orderboek, momentum</span></span><span class="pbar"><i id="bSig"></i></span><span id="pSig" class="val mono">–</span></div>
-    <div class="row"><span>Historisch vergelijkbaar<span id="analogSub" class="sub">laatste 21 dagen laden…</span></span><span class="pbar"><i id="bHist"></i></span><span id="pHist" class="val mono">–</span></div>
+    <div class="row"><span>Historisch vergelijkbaar<span id="analogSub" class="sub">historie laden…</span></span><span class="pbar"><i id="bHist"></i></span><span id="pHist" class="val mono">–</span></div>
     <p class="small muted" style="margin:10px 0 0">De bovenste balk op de pagina gebruikt <b>Met signalen</b>. Als de drie ver uit elkaar liggen: voorzichtig.</p>
   </section>
 
@@ -188,7 +234,7 @@ td.wrap { white-space: normal; text-align: left; }
     <div class="row"><span>Trend (EMA 9 vs 21)</span><span class="meter"><i id="mTrend"></i></span><span id="vTrend" class="val mono">–</span></div>
     <div class="row"><span>RSI (14, 1 min)<span class="sub">&gt;70 overkocht, &lt;30 oververkocht</span></span><span class="meter"><i id="mRsi"></i></span><span id="vRsi" class="val mono">–</span></div>
     <div class="row"><span>Prijs vs. VWAP venster</span><span></span><span id="vVwap" class="val mono">–</span></div>
-    <div class="row"><span>Volatiliteit<span class="sub">verwachte beweging per 15 min (1σ)</span></span><span></span><span id="vVol" class="val mono">–</span></div>
+    <div class="row"><span>Volatiliteit<span class="sub">verwachte beweging per venster (1σ)</span></span><span></span><span id="vVol" class="val mono">–</span></div>
     <div class="row"><span><b>Totale signaalscore</b><span class="sub">−1 = sterk DOWN, +1 = sterk UP</span></span><span class="meter"><i id="mScore"></i></span><span id="vScore" class="val mono">–</span></div>
   </section>
 
@@ -198,7 +244,7 @@ td.wrap { white-space: normal; text-align: left; }
     <div id="nextLabel" class="big mono">–</div>
     <div id="nextStart" class="small muted"></div>
     <div class="row" style="margin-top:8px"><span>Kans op UP<span id="nextSub" class="sub">model wordt getraind…</span></span><span class="pbar"><i id="bNext"></i></span><span id="pNext" class="val mono">–</span></div>
-    <div class="row"><span>Basisfrequentie UP<span class="sub">alle vensters laatste 21 dagen</span></span><span class="pbar"><i id="bBase"></i></span><span id="pBase" class="val mono">–</span></div>
+    <div class="row"><span>Basisfrequentie UP<span class="sub">alle vensters laatste <span class="histDays">21</span> dagen</span></span><span class="pbar"><i id="bBase"></i></span><span id="pBase" class="val mono">–</span></div>
     <div class="label" style="margin-top:10px">Waarom? (wat duwt de voorspelling omhoog of omlaag)</div>
     <div id="nextWhy"></div>
     <div id="nextVerdict" class="edge small">–</div>
@@ -209,9 +255,9 @@ td.wrap { white-space: normal; text-align: left; }
     <h2>Patroonherkenning — lijkt de chart nu op eerdere momenten?</h2>
     <div class="pgrid">
       <div>
-        <div class="label">Meest gelijkende chartvormen uit de laatste 21 dagen (prijs + order flow, laatste 30 min) en wat er daarna gebeurde</div>
+        <div class="label" id="knnLabel">Meest gelijkende chartvormen uit de historie (prijs + order flow) en wat er daarna gebeurde</div>
         <canvas id="knnChart" style="height:240px"></canvas>
-        <div class="small muted" style="margin:4px 0 6px">Dikke lijn = nu. Dunne lijnen = gelijkende momenten (groen eindigde hoger, rood lager). Rechts van "nu" = de 15 minuten daarna.</div>
+        <div class="small muted" style="margin:4px 0 6px">Dikke lijn = nu. Dunne lijnen = gelijkende momenten (groen eindigde hoger, rood lager). Rechts van "nu" = één venster daarna.</div>
         <div class="row"><span>Kans UP volgens gelijkende momenten<span id="knnSub" class="sub">wacht op historie…</span></span><span class="pbar"><i id="bKnn"></i></span><span id="pKnn" class="val mono">–</span></div>
         <div id="knnVal" class="small muted" style="margin-top:6px"></div>
       </div>
@@ -246,14 +292,14 @@ td.wrap { white-space: normal; text-align: left; }
   <!-- Track record -->
   <section class="card">
     <h2>Eigen track record (in deze browser)</h2>
-    <div id="trackSum" class="small muted">Wordt opgebouwd zolang deze pagina open staat: de voorspelling vooraf en de kans na 1, 5 en 10 minuten worden bewaard en na afloop vergeleken met de uitslag.</div>
-    <div class="tablewrap"><table><thead><tr><th>Venster</th><th>vooraf</th><th>na 1m</th><th>na 5m</th><th>na 10m</th><th>Uitslag</th></tr></thead><tbody id="track"></tbody></table></div>
+    <div id="trackSum" class="small muted">Wordt opgebouwd zolang deze pagina open staat: de voorspelling vooraf en de kans op een paar momenten in het venster worden bewaard en na afloop vergeleken met de uitslag.</div>
+    <div class="tablewrap"><table><thead><tr id="trackHead"></tr></thead><tbody id="track"></tbody></table></div>
     <div class="inline"><button id="trackClear">Track record wissen</button></div>
   </section>
 
   <!-- Modelcheck -->
   <section class="card">
-    <h2>Modelcheck (laatste 21 dagen)</h2>
+    <h2>Modelcheck (laatste <span class="histDays">21</span> dagen)</h2>
     <div id="calibSum" class="small muted">Historie laden…</div>
     <div class="tablewrap"><table><thead><tr><th>Model zei</th><th>gem.</th><th>werkelijk UP</th><th>n</th></tr></thead><tbody id="calib"></tbody></table></div>
     <div class="label" style="margin-top:10px">Trefkans van de statistische kans per minuut in het venster</div>
@@ -264,14 +310,15 @@ td.wrap { white-space: normal; text-align: left; }
   <section class="card wide explain">
     <h2>Hoe werkt het — en waar moet je op letten</h2>
     <ul>
-      <li><strong>De markt:</strong> bij Polymarket "Bitcoin Up or Down – 15 min" wint UP als de prijs aan het eind van het venster <em>gelijk aan of hoger</em> is dan de prijs aan het begin ("price to beat"). Vensters starten elk kwartier (:00, :15, :30, :45). Polymarket rekent met New York-tijd; 18:00 hier = 12:00 ET.</li>
-      <li><strong>Prijsbron:</strong> Polymarket gebruikt de Chainlink BTC/USD-feed, deze pagina gebruikt Binance BTC/USDT. Die verschillen meestal een paar tot tientallen dollars. Staat de prijs vlak bij de open, dan kan dat verschil de uitslag bepalen — vul dan de echte price to beat van Polymarket in.</li>
+      <li id="exMarket"></li>
+      <li id="exSource"></li>
+      <li><strong>Koopadvies:</strong> een koopsignaal komt alleen als (1) de conservatieve slagingskans (de laagste van het model en de historie) boven jouw minimum ligt, (2) de historie het bevestigt, (3) order flow en sweeps niet tegen je richting in gaan, en (4) de Polymarket-prijs onder de max prijs ligt. De inzet-suggestie is een kwart van het Kelly-criterium, maximaal 5% van je potje.</li>
       <li><strong>Statistische kans:</strong> hoe ver de prijs nu boven/onder de open staat, gedeeld door hoeveel BTC normaal beweegt in de resterende tijd (volatiliteit uit de laatste uren). Hoe minder tijd over, hoe zekerder.</li>
       <li><strong>Signalen:</strong> order flow (wie koopt/verkoopt agressief), het orderboek, momentum, trend en RSI schuiven de kans een beetje op (maximaal ±10 procentpunt rond 50%). Dit zijn vuistregels, geen bewezen voorspellers — het orderboek kan bijvoorbeeld nep-orders (spoofing) bevatten.</li>
-      <li><strong>Geleerd model:</strong> de pagina downloadt 21 dagen aan 1-minuut-data en leert daaruit zelf hoeveel momentum, order flow (5/15/60 min), RSI, trend, VWAP en volume echt zeggen over de uitkomst — zowel vooraf als tijdens het venster. Het wordt getest op data die het niet gezien heeft, en elk uur opnieuw getraind. Is het in die test niet beter dan gokken, dan zegt de pagina dat eerlijk.</li>
-      <li><strong>Patroonherkenning:</strong> (1) de pagina zoekt in 21 dagen de 40 momenten waarop prijs én order flow er het meest uitzagen als nu en telt hoe vaak het daarna omhoog ging; (2) bekende patronen (engulfing, hamer, doji, uitbraken, reeksen, koopdruk, divergentie, volumepieken, tijdstip) worden geteld en apart getest. Alleen patronen met ✓ hielden in de test stand.</li>
+      <li><strong>Geleerd model:</strong> de pagina downloadt de historie (5 min: 10 dagen, 15 min: 21 dagen, 1 uur: 45 dagen) aan 1-minuut-data en leert daaruit zelf hoeveel momentum, order flow (over drie periodes passend bij het venster), RSI, trend, VWAP en volume echt zeggen over de uitkomst — zowel vooraf als tijdens het venster. Het wordt getest op data die het niet gezien heeft, en elk uur opnieuw getraind. Is het in die test niet beter dan gokken, dan zegt de pagina dat eerlijk.</li>
+      <li><strong>Patroonherkenning:</strong> (1) de pagina zoekt in de historie de 40 momenten waarop prijs én order flow er het meest uitzagen als nu en telt hoe vaak het daarna omhoog ging; (2) bekende patronen (engulfing, hamer, doji, uitbraken, reeksen, koopdruk, divergentie, volumepieken, tijdstip) worden geteld en apart getest. Alleen patronen met ✓ hielden in de test stand.</li>
       <li><strong>Highs &amp; lows:</strong> de pagina houdt de highs en lows bij van het vorige venster, het afgelopen uur, 4 uur en 24 uur, plus swing highs/lows en ronde getallen. Per niveau zie je of het doorbroken is, of er een "sweep" was (erdoorheen en terug), en hoe groot de kans is dat het nog in dit venster geraakt wordt. Uitbraken en sweeps zijn ook als patroon getest, en de afstand tot de highs/lows zit in het geleerde model.</li>
-      <li><strong>Historisch vergelijkbaar:</strong> in de afgelopen 21 dagen, hoe vaak eindigde een venster UP als de prijs op hetzelfde moment ongeveer even ver van de open stond.</li>
+      <li><strong>Historisch vergelijkbaar:</strong> in de historie, hoe vaak eindigde een venster UP als de prijs op hetzelfde moment ongeveer even ver van de open stond.</li>
       <li><strong>Modelcheck &amp; track record:</strong> laten zien hoe goed de kansen in het verleden klopten. Vertrouw de tool pas als die cijfers er goed uitzien.</li>
     </ul>
     <p><strong>Eerlijk gezegd:</strong> aan het begin van een venster is BTC vrijwel een muntworp; niemand voorspelt dat betrouwbaar. Een voordeel ontstaat hooguit als de prijs op Polymarket afwijkt van de werkelijke kans — en spread en fees eten een deel daarvan op. Gebruik dit als hulpmiddel, niet als garantie, en zet nooit meer in dan je kunt missen.</p>
@@ -285,7 +332,20 @@ td.wrap { white-space: normal; text-align: left; }
 // ---------- Instellingen ----------
 const SYMBOL = 'BTCUSDT';
 const MIN = 60000;
-const WIN = 15 * MIN;
+
+// Tijdsframes. h = drie horizons (min) voor momentum/order flow; knnL = lengte chartvorm (min);
+// checkpoints = momenten (min) voor het track record; entryKs = momenten voor de instap-tabel.
+const TIMEFRAMES = {
+  '5m': { key: '5m', min: 5, label: '5 min', histDays: 10, h: [1, 5, 15], knnL: 30, knnStep: 2, inStep: 1,
+    src: 'chainlink', checkpoints: [0, 1, 2, 3], calibKs: [1, 2, 3, 4], entryKs: [1, 2, 3, 4] },
+  '15m': { key: '15m', min: 15, label: '15 min', histDays: 21, h: [5, 15, 60], knnL: 30, knnStep: 3, inStep: 1,
+    src: 'chainlink', checkpoints: [0, 1, 5, 10], calibKs: [1, 3, 5, 7, 10, 12, 14], entryKs: [2, 4, 6, 8, 10, 12, 13, 14] },
+  '1h': { key: '1h', min: 60, label: '1 uur', histDays: 45, h: [15, 60, 240], knnL: 120, knnStep: 6, inStep: 3,
+    src: 'binance', checkpoints: [0, 5, 20, 40], calibKs: [1, 10, 20, 30, 40, 50, 59], entryKs: [5, 15, 25, 35, 45, 50, 55, 58] },
+};
+let TF = TIMEFRAMES['15m'];
+let WIN = TF.min * MIN;      // vensterlengte in ms
+let WM = TF.min;             // vensterlengte in minuten
 const REST_BASES = ['https://api.binance.com', 'https://data-api.binance.vision'];
 const WS_BASES = ['wss://stream.binance.com:9443', 'wss://data-stream.binance.vision'];
 const PM_GAMMA = 'https://gamma-api.polymarket.com';
@@ -295,10 +355,11 @@ const SIGMA_FLOOR = 0.0002;    // minimaal 0,02% per minuut
 const SIGNAL_K = 0.25;         // max. verschuiving (in σ) door signalen
 const NEXT_K = 0.12;           // signalen voorspellen het volgende venster nog minder
 const BIG_TRADE_USD = 100000;
-const HIST_DAYS = 21;
 const NEAR_OPEN_USD = 25;      // binnen deze afstand kan Binance vs. Chainlink de uitslag bepalen
-const TR_KEY = 'btc15.trackrecord.v1';
-const CHECKPOINTS = [0, 1, 5, 10];   // 0 = voorspelling vooraf
+const TF_KEY = 'btc.tf.v1';
+const CFG_KEY = 'btc.advice.v1';
+// 15 min houdt de oude sleutel zodat een bestaand track record bewaard blijft
+const trKey = () => TF.key === '15m' ? 'btc15.trackrecord.v1' : `btc${TF.key}.trackrecord.v1`;
 const WEIGHTS = { flow1: 0.25, flow5: 0.20, book: 0.15, mom: 0.20, trend: 0.10, rsi: 0.10 };
 
 // ---------- Status ----------
@@ -313,10 +374,14 @@ const S = {
   manualOpen: {},        // vensterstart -> price to beat
   manualPm: { up: null, down: null },
   pm: null,
-  hist: { candles: [], samples: [], loading: true, error: null },
+  hist: { candles: [], samples: [], loading: true, busy: false, error: null, job: Promise.resolve() },
   analog: null,
   track: [],
   curWs: null,
+  gen: 0,                // verhoogd bij elke wissel van tijdsframe; oude berekeningen worden dan genegeerd
+  cfg: { minP: 0.75, edge: 0.04, fee: 0.02, th: 0.8 },
+  entryCache: {},
+  levels: null,
   ws: null, wsIdx: 0, wsFails: 0, lastMsg: 0, reconnectTimer: null,
   last: null,
 };
@@ -336,6 +401,7 @@ const fmtSigned = (x, d = 2) => x == null || !isFinite(x) ? '–' : sign(x) + Ma
 const fmtCountdown = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
 const cents = p => p == null || !isFinite(p) ? '–' : (p * 100).toFixed(1) + '¢';
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const durText = mins => mins < 60 ? `${mins} min` : mins % 1440 === 0 ? `${mins / 1440} ${mins === 1440 ? 'dag' : 'dagen'}` : `${+(mins / 60).toFixed(1)} uur`;
 
 function erf(x) { // Abramowitz & Stegun 7.1.26
   const s = Math.sign(x); x = Math.abs(x);
@@ -589,30 +655,62 @@ async function watchdog() {
   }
 }
 
-// ---------- Historie (21 dagen) voor "vergelijkbaar" en modelcheck ----------
-async function loadHistory() {
-  const need = HIST_DAYS * 24 * 60;
-  const all = [];
-  let end = Date.now();
-  try {
-    while (all.length < need) {
-      const batch = await getKlines(1000, end);
-      if (!batch.length) break;
-      all.unshift(...batch);
-      end = batch[0].t - 1;
-      $('calibSum').textContent = `Historie laden… ${Math.min(100, Math.round(all.length / need * 100))}%`;
-    }
-    const now = Date.now();
-    S.hist.candles = all.filter(c => c.t + MIN <= now);
-    S.hist.loading = false;
+// ---------- Historie voor "vergelijkbaar", modellen en modelcheck ----------
+// Zorgt dat er genoeg historie is voor het gekozen tijdsframe; haalt zo nodig oudere data bij.
+// Alle laadklussen lopen na elkaar via één promise-keten, zodat er nooit twee tegelijk lopen.
+function ensureHistory() {
+  S.hist.job = S.hist.job.then(loadHistory).then(() => {
+    if (S.hist.error) return;
     rebuildSamples();
     renderCalib();
     retrain();
+  });
+  return S.hist.job;
+}
+
+async function loadHistory() {
+  const covered = () => {
+    const h = S.hist.candles;
+    return h.length ? Date.now() - h[0].t : 0;
+  };
+  const needMs = () => TF.histDays * 24 * 60 * MIN;
+  if (covered() >= needMs() - 2 * 60 * MIN) return;
+  const first = !S.hist.candles.length;
+  if (first) S.hist.loading = true; else S.hist.busy = true;
+  S.hist.error = null;
+  const older = [];
+  let end = first ? Date.now() : S.hist.candles[0].t - 1;
+  try {
+    while (covered() + older.length * MIN < needMs()) {
+      const batch = await getKlines(1000, end);
+      if (!batch.length) break;
+      older.unshift(...batch);
+      end = batch[0].t - 1;
+      const pct = Math.min(100, Math.round((covered() + older.length * MIN) / needMs() * 100));
+      $('calibSum').textContent = `Historie laden (${TF.histDays} dagen)… ${pct}%`;
+      $('entryTbl').innerHTML = `<tr><td colspan="5" class="muted">Historie laden… ${pct}%</td></tr>`;
+    }
+    const now = Date.now();
+    if (first) S.hist.candles = older.filter(c => c.t + MIN <= now);
+    else {
+      const firstT = S.hist.candles[0].t;
+      S.hist.candles = older.filter(c => c.t < firstT).concat(S.hist.candles);
+    }
   } catch (e) {
-    S.hist.loading = false;
     S.hist.error = e.message;
     $('calibSum').textContent = 'Historie kon niet geladen worden (' + e.message + ').';
+  } finally {
+    S.hist.loading = false;
+    S.hist.busy = false;
   }
+}
+
+// Alleen de historie die bij het tijdsframe hoort (na een uitstapje naar 1 uur staat er meer in het geheugen)
+function histCandles() {
+  const h = S.hist.candles, cutoff = Date.now() - TF.histDays * 24 * 60 * MIN;
+  let lo = 0, hi = h.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (h[mid].t < cutoff) lo = mid + 1; else hi = mid; }
+  return lo ? h.slice(lo) : h;
 }
 
 function appendHist(c) {
@@ -636,51 +734,56 @@ function sigmaSeries(c) {
 }
 
 function rebuildSamples() {
-  const c = S.hist.candles;
+  const c = histCandles();
   if (c.length < 200) return;
   const sig = sigmaSeries(c);
-  const samples = [];
-  for (let i = 120; i + 14 < c.length; i++) {
+  const samples = [], L = WM - 1;
+  for (let i = 120; i + L < c.length; i++) {
     if (c[i].t % WIN !== 0) continue;
-    if (c[i + 14].t !== c[i].t + 14 * MIN) continue;   // gat in de data
-    const open = c[i].o, up = c[i + 14].c >= open;
+    if (c[i + L].t !== c[i].t + L * MIN) continue;   // gat in de data
+    const open = c[i].o, up = c[i + L].c >= open;
     samples.push({ k: 0, z: 0, up });
-    for (let k = 1; k <= 14; k++) {
+    for (let k = 1; k <= L; k++) {
       const s = sig[i + k - 1];
       if (!s) continue;
-      samples.push({ k, z: Math.log(c[i + k - 1].c / open) / (s * Math.sqrt(15 - k)), up });
+      samples.push({ k, z: Math.log(c[i + k - 1].c / open) / (s * Math.sqrt(WM - k)), up });
     }
   }
   S.hist.samples = samples;
+  S.entryCache = {};
 }
 
 // ---------- Leermodel ----------
 // Kenmerken die de chart en de order flow beschrijven, berekend met candles t/m index j.
 // Precies dezelfde functie wordt gebruikt voor training (historie) en live voorspellen.
-const PRE_FEATS = ['mom5', 'mom15', 'mom60', 'flow5', 'flow15', 'flow60', 'rsi', 'trend', 'vwap60', 'volx', 'dHi60', 'dLo60', 'dHi240', 'dLo240'];
-const IN_FEATS = ['z', 'flow1', 'flow5', 'mom5', 'trend', 'rsi'];
-const FEAT_NAMES = {
-  z: 'Afstand tot open', mom5: 'Momentum 5 min', mom15: 'Momentum 15 min', mom60: 'Momentum 60 min',
-  flow1: 'Order flow 1 min', flow5: 'Order flow 5 min', flow15: 'Order flow 15 min', flow60: 'Order flow 60 min',
-  rsi: 'RSI', trend: 'Trend EMA 9/21', vwap60: 'Prijs vs. VWAP 60 min', volx: 'Volume vs. normaal',
-  dHi60: 'Afstand tot 1-uurs high', dLo60: 'Afstand tot 1-uurs low', dHi240: 'Afstand tot 4-uurs high', dLo240: 'Afstand tot 4-uurs low',
-};
-const FEAT_LOOKBACK = 240;
+// A/B/C = de drie horizons van het tijdsframe (bijv. 15 min: 5, 15 en 60 min)
+const PRE_FEATS = ['momA', 'momB', 'momC', 'flowA', 'flowB', 'flowC', 'rsi', 'trend', 'vwap60', 'volx', 'dHi60', 'dLo60', 'dHi240', 'dLo240'];
+const IN_FEATS = ['z', 'flow1', 'flowA', 'momA', 'trend', 'rsi'];
+function featName(k) {
+  const [a, b, c] = TF.h;
+  return {
+    z: 'Afstand tot open', momA: `Momentum ${a} min`, momB: `Momentum ${b} min`, momC: `Momentum ${c} min`,
+    flow1: 'Order flow 1 min', flowA: `Order flow ${a} min`, flowB: `Order flow ${b} min`, flowC: `Order flow ${c} min`,
+    rsi: 'RSI', trend: 'Trend EMA 9/21', vwap60: 'Prijs vs. VWAP 60 min', volx: 'Volume vs. normaal',
+    dHi60: 'Afstand tot 1-uurs high', dLo60: 'Afstand tot 1-uurs low', dHi240: 'Afstand tot 4-uurs high', dLo240: 'Afstand tot 4-uurs low',
+  }[k] || k;
+}
+const FEAT_LOOKBACK = 240;   // ≥ grootste horizon (240 min)
 const clampF = x => clamp(x, -4, 4);
 
 function featsAt(c, sig, j) {
   const s = sig[j];
   if (!s || j < FEAT_LOOKBACK) return null;
-  const p = c[j].c;
+  const p = c[j].c, [hA, hB, hC] = TF.h;
   const ret = m => clampF(Math.log(p / c[j - m].c) / (s * Math.sqrt(m)));
   const flow = m => { let b = 0, v = 0; for (let i = j - m + 1; i <= j; i++) { b += c[i].tbv; v += c[i].v; } return v ? (2 * b - v) / v : 0; };
   const closes = [];
   for (let i = j - 99; i <= j; i++) closes.push(c[i].c);
   const r = rsi(closes, 14);
   const e9 = ema(closes.slice(-60), 9), e21 = ema(closes.slice(-90), 21);
-  let pv = 0, vv = 0, v15 = 0, v240 = 0;
+  let pv = 0, vv = 0, vB = 0, v240 = 0;
   for (let i = j - 59; i <= j; i++) { pv += (c[i].h + c[i].l + c[i].c) / 3 * c[i].v; vv += c[i].v; }
-  for (let i = j - 14; i <= j; i++) v15 += c[i].v;
+  for (let i = j - hB + 1; i <= j; i++) vB += c[i].v;
   let hi60 = -Infinity, lo60 = Infinity, hi240 = -Infinity, lo240 = Infinity;
   for (let i = j - 239; i <= j; i++) {
     v240 += c[i].v;
@@ -690,12 +793,12 @@ function featsAt(c, sig, j) {
   const dist = (lvl, m) => clampF(Math.log(p / lvl) / (s * Math.sqrt(m)));
   return {
     dHi60: dist(hi60, 60), dLo60: dist(lo60, 60), dHi240: dist(hi240, 240), dLo240: dist(lo240, 240),
-    mom5: ret(5), mom15: ret(15), mom60: ret(60),
-    flow1: flow(1), flow5: flow(5), flow15: flow(15), flow60: flow(60),
+    momA: ret(hA), momB: ret(hB), momC: ret(hC),
+    flow1: flow(1), flowA: flow(hA), flowB: flow(hB), flowC: flow(hC),
     rsi: r == null ? 0 : (r - 50) / 50,
     trend: clampF(Math.log(e9 / e21) / s / 3),
     vwap60: vv ? clampF(Math.log(p / (pv / vv)) / (s * Math.sqrt(30))) : 0,
-    volx: v240 ? clamp(Math.log((v15 / 15) / (v240 / 240) + 1e-9), -3, 3) : 0,
+    volx: v240 ? clamp(Math.log((vB / hB) / (v240 / 240) + 1e-9), -3, 3) : 0,
   };
 }
 
@@ -749,16 +852,16 @@ function evaluate(m, X, y, base) {
 // Bouwt de datasets: één rij per venster (vooraf) en één rij per minuut in het venster
 function buildDatasets(c) {
   const sig = sigmaSeries(c);
-  const pre = { X: [], y: [] }, inw = { X: [], y: [], zStat: [] };
-  for (let i = FEAT_LOOKBACK + 1; i + 14 < c.length; i++) {
-    if (c[i].t % WIN !== 0 || c[i + 14].t !== c[i].t + 14 * MIN || c[i - 1].t !== c[i].t - MIN) continue;
-    const open = c[i].o, y = c[i + 14].c >= open ? 1 : 0;
+  const pre = { X: [], y: [] }, inw = { X: [], y: [], zStat: [] }, L = WM - 1;
+  for (let i = FEAT_LOOKBACK + 1; i + L < c.length; i++) {
+    if (c[i].t % WIN !== 0 || c[i + L].t !== c[i].t + L * MIN || c[i - 1].t !== c[i].t - MIN) continue;
+    const open = c[i].o, y = c[i + L].c >= open ? 1 : 0;
     const f0 = featsAt(c, sig, i - 1);
     if (f0) { pre.X.push(PRE_FEATS.map(k => f0[k])); pre.y.push(y); }
-    for (let k = 1; k <= 14; k++) {
+    for (let k = 1; k <= L; k += TF.inStep) {
       const j = i + k - 1, f = featsAt(c, sig, j);
       if (!f) continue;
-      f.z = clamp(Math.log(c[j].c / open) / (sig[j] * Math.sqrt(15 - k)), -6, 6);
+      f.z = clamp(Math.log(c[j].c / open) / (sig[j] * Math.sqrt(WM - k)), -6, 6);
       inw.X.push(IN_FEATS.map(n => f[n])); inw.y.push(y); inw.zStat.push(f.z);
     }
   }
@@ -766,9 +869,10 @@ function buildDatasets(c) {
 }
 
 function trainModels() {
-  const c = S.hist.candles;
+  const c = histCandles();
   if (c.length < FEAT_LOOKBACK + 2000) { S.model = { error: 'te weinig historie' }; return; }
   const { pre, inw } = buildDatasets(c);
+  if (pre.X.length < 200 || inw.X.length < 500) { S.model = { error: 'te weinig vensters in de historie' }; return; }
   const split = (d, f) => {
     const cut = Math.floor(d.X.length * f);
     return [{ X: d.X.slice(0, cut), y: d.y.slice(0, cut) }, { X: d.X.slice(cut), y: d.y.slice(cut), zStat: d.zStat && d.zStat.slice(cut) }];
@@ -806,19 +910,19 @@ function prePredict(ws) {
 }
 
 // ---------- Patroonherkenning 1: gelijkende chartvormen (k-nearest-neighbours) ----------
-const KNN_L = 30, KNN_K = 40, KNN_STEP = 3;
+const KNN_K = 40, KNN_PTS = 30;
 
-// Vorm van de laatste 30 min (prijs in σ t.o.v. nu) + order flow per blok van 5 min
+// Vorm van de laatste TF.knnL minuten: 30 prijspunten (in σ t.o.v. nu) + order flow in 6 blokken
 function shapeVec(c, sig, j) {
-  const s = sig[j];
-  if (!s || j < KNN_L) return null;
-  const v = new Float64Array(KNN_L + 6);
-  const norm = s * Math.sqrt(KNN_L);
-  for (let m = 0; m < KNN_L; m++) v[m] = clamp(Math.log(c[j - KNN_L + 1 + m].c / c[j].c) / norm, -4, 4);
+  const s = sig[j], L = TF.knnL, step = L / KNN_PTS, blk = L / 6;
+  if (!s || j < L) return null;
+  const v = new Float64Array(KNN_PTS + 6);
+  const norm = s * Math.sqrt(L);
+  for (let m = 0; m < KNN_PTS; m++) v[m] = clamp(Math.log(c[j - L + (m + 1) * step].c / c[j].c) / norm, -4, 4);
   for (let b = 0; b < 6; b++) {
     let bv = 0, vv = 0;
-    for (let i = j - 29 + b * 5; i < j - 24 + b * 5; i++) { bv += c[i].tbv; vv += c[i].v; }
-    v[KNN_L + b] = vv ? (2 * bv - vv) / vv * 4 : 0;
+    for (let i = j - L + 1 + b * blk; i < j - L + 1 + (b + 1) * blk; i++) { bv += c[i].tbv; vv += c[i].v; }
+    v[KNN_PTS + b] = vv ? (2 * bv - vv) / vv * 4 : 0;
   }
   return v;
 }
@@ -834,8 +938,8 @@ function knnQuery(lib, v, k = KNN_K) {
   const order = Array.from(d.keys()).sort((a, b) => d[a] - d[b]);
   const picked = [];
   for (const i of order) {
-    // geen buren uit dezelfde episode (binnen 15 min van elkaar)
-    if (picked.some(p => Math.abs(lib[p].t - lib[i].t) < 15 * MIN)) continue;
+    // geen buren uit dezelfde episode (binnen één venster van elkaar)
+    if (picked.some(p => Math.abs(lib[p].t - lib[i].t) < WIN)) continue;
     picked.push(i);
     if (picked.length >= k) break;
   }
@@ -844,20 +948,21 @@ function knnQuery(lib, v, k = KNN_K) {
 }
 
 function buildKnn() {
-  const c = S.hist.candles, sig = sigmaSeries(c);
+  const c = histCandles(), sig = sigmaSeries(c), L = TF.knnL;
   const lib = [];
-  for (let j = 60; j + 15 < c.length; j++) {
-    if (c[j + 15].t !== c[j].t + 15 * MIN || c[j - 29].t !== c[j].t - 29 * MIN) continue;
+  for (let j = L + 30; j + WM < c.length; j++) {
+    if (c[j + WM].t !== c[j].t + WM * MIN || c[j - L + 1].t !== c[j].t - (L - 1) * MIN) continue;
     const aligned = (c[j].t + MIN) % WIN === 0;     // j = laatste minuut vóór een vensterstart
-    if (!aligned && j % KNN_STEP) continue;
+    if (!aligned && j % TF.knnStep) continue;
     const v = shapeVec(c, sig, j);
     if (!v) continue;
-    lib.push({ j, t: c[j].t, v, up: c[j + 15].c >= c[j + 1].o, aligned });
+    // uitkomst: slot na één venster ≥ open van de eerste minuut daarna (zoals Polymarket)
+    lib.push({ j, t: c[j].t, v, up: c[j + WM].c >= c[j + 1].o, aligned });
   }
   if (lib.length < 2000) return null;
   // Eerlijke test: buren alleen uit de eerste 70%, testen op vensterstarts in de laatste 30%
   const cut = lib[Math.floor(lib.length * 0.7)].t;
-  const train = lib.filter(x => x.t < cut - 15 * MIN), test = lib.filter(x => x.t >= cut && x.aligned);
+  const train = lib.filter(x => x.t < cut - WIN), test = lib.filter(x => x.t >= cut && x.aligned);
   const base = train.filter(x => x.up).length / train.length;
   let hit = 0, brier = 0, brierBase = 0, selN = 0, selHit = 0;
   for (const x of test) {
@@ -867,33 +972,35 @@ function buildKnn() {
     if (Math.abs(p - 0.5) >= 0.08) { selN++; if (ok) selHit++; }
   }
   const n = test.length;
-  return { lib, sig, val: { n, acc: hit / n, brier: brier / n, brierBase: brierBase / n, selN, selAcc: selN ? selHit / selN : null } };
+  return { lib, sig, c, val: { n, acc: hit / n, brier: brier / n, brierBase: brierBase / n, selN, selAcc: selN ? selHit / selN : null } };
 }
 
 function knnLive() {
   const K = S.knn;
   if (!K) return null;
-  const cs = S.klines.filter(c => c.t + MIN <= Date.now());
-  if (cs.length < 60) return null;
+  const cs = S.klines.filter(c => c.t + MIN <= Date.now()), L = TF.knnL;
+  if (cs.length < L + 32) return null;
   const sig = sigmaSeries(cs), j = cs.length - 1, v = shapeVec(cs, sig, j);
   if (!v) return null;
   const r = knnQuery(K.lib, v);
-  r.now = Array.from({ length: KNN_L }, (_, m) => Math.log(cs[j - KNN_L + 1 + m].c / cs[j].c) / sig[j]);
+  r.now = Array.from({ length: L }, (_, m) => Math.log(cs[j - L + 1 + m].c / cs[j].c) / sig[j]);
   return r;
 }
 
-// ---------- Patroonherkenning 2: klassieke patronen op 15-min candles ----------
+// ---------- Patroonherkenning 2: klassieke patronen op candles van één venster ----------
 function buildWindows(c) {
-  const W = [];
-  for (let i = 0; i + 14 < c.length; i++) {
-    if (c[i].t % WIN !== 0 || c[i + 14].t !== c[i].t + 14 * MIN) continue;
+  const W = [], L = WM - 1;
+  for (let i = 0; i + L < c.length; i++) {
+    if (c[i].t % WIN !== 0 || c[i + L].t !== c[i].t + L * MIN) continue;
     let h = -Infinity, l = Infinity, v = 0, tbv = 0;
-    for (let k = i; k <= i + 14; k++) { h = Math.max(h, c[k].h); l = Math.min(l, c[k].l); v += c[k].v; tbv += c[k].tbv; }
-    W.push({ t: c[i].t, o: c[i].o, h, l, c: c[i + 14].c, v, tbv });
-    i += 14;
+    for (let k = i; k <= i + L; k++) { h = Math.max(h, c[k].h); l = Math.min(l, c[k].l); v += c[k].v; tbv += c[k].tbv; }
+    W.push({ t: c[i].t, o: c[i].o, h, l, c: c[i + L].c, v, tbv });
+    i += L;
   }
   return W;
 }
+// Patroonnamen met de juiste duur voor het tijdsframe (4, 16 en 96 vensters terug)
+const patName = name => name.replace('{1}', durText(4 * WM)).replace('{4}', durText(16 * WM)).replace('{D}', durText(96 * WM));
 
 const wBody = x => Math.abs(x.c - x.o), wRange = x => x.h - x.l, wUp = x => x.c >= x.o;
 const wRet = x => Math.log(x.c / x.o), wFlow = x => x.v ? (2 * x.tbv - x.v) / x.v : 0;
@@ -908,20 +1015,20 @@ const PATTERNS = [
   ['hammer', 'Hamer (lange onderlont)', (W, w) => { const x = W[w]; return wRange(x) > 0 && lowWick(x) >= 2 * wBody(x) && highWick(x) <= wBody(x) && lowWick(x) > 0.4 * wRange(x); }],
   ['star', 'Shooting star (lange bovenlont)', (W, w) => { const x = W[w]; return wRange(x) > 0 && highWick(x) >= 2 * wBody(x) && lowWick(x) <= wBody(x) && highWick(x) > 0.4 * wRange(x); }],
   ['doji', 'Doji (besluiteloos)', (W, w) => wRange(W[w]) > 0 && wBody(W[w]) <= 0.1 * wRange(W[w])],
-  ['brkUp', 'Uitbraak boven hoogste van afgelopen uur', (W, w) => W[w].c > Math.max(W[w - 1].h, W[w - 2].h, W[w - 3].h, W[w - 4].h)],
-  ['brkDown', 'Uitbraak onder laagste van afgelopen uur', (W, w) => W[w].c < Math.min(W[w - 1].l, W[w - 2].l, W[w - 3].l, W[w - 4].l)],
+  ['brkUp', 'Uitbraak boven hoogste van afgelopen {1}', (W, w) => W[w].c > Math.max(W[w - 1].h, W[w - 2].h, W[w - 3].h, W[w - 4].h)],
+  ['brkDown', 'Uitbraak onder laagste van afgelopen {1}', (W, w) => W[w].c < Math.min(W[w - 1].l, W[w - 2].l, W[w - 3].l, W[w - 4].l)],
   ['buyFlow', 'Sterke koopdruk (order flow > +8%)', (W, w) => wFlow(W[w]) > 0.08],
   ['sellFlow', 'Sterke verkoopdruk (order flow < −8%)', (W, w) => wFlow(W[w]) < -0.08],
   ['divBull', 'Prijs omlaag, maar kopers overheersen', (W, w) => !wUp(W[w]) && wFlow(W[w]) > 0.04],
   ['divBear', 'Prijs omhoog, maar verkopers overheersen', (W, w) => wUp(W[w]) && wFlow(W[w]) < -0.04],
   ['prevHiBrk', 'Slot boven high van vorig venster', (W, w) => W[w].c > W[w - 1].h],
   ['prevLoBrk', 'Slot onder low van vorig venster', (W, w) => W[w].c < W[w - 1].l],
-  ['sweepHi', 'Sweep van uur-high (erboven geweest, slot eronder)', (W, w, x) => W[w].h > x.hi1 && W[w].c < x.hi1],
-  ['sweepLo', 'Sweep van uur-low (eronder geweest, slot erboven)', (W, w, x) => W[w].l < x.lo1 && W[w].c > x.lo1],
-  ['brk4Up', 'Uitbraak boven 4-uurs high', (W, w, x) => W[w].c > x.hi4],
-  ['brk4Down', 'Uitbraak onder 4-uurs low', (W, w, x) => W[w].c < x.lo4],
-  ['brkDUp', 'Uitbraak boven 24-uurs high', (W, w, x) => W[w].c > x.hiD],
-  ['brkDDown', 'Uitbraak onder 24-uurs low', (W, w, x) => W[w].c < x.loD],
+  ['sweepHi', 'Sweep van high afgelopen {1} (erboven geweest, slot eronder)', (W, w, x) => W[w].h > x.hi1 && W[w].c < x.hi1],
+  ['sweepLo', 'Sweep van low afgelopen {1} (eronder geweest, slot erboven)', (W, w, x) => W[w].l < x.lo1 && W[w].c > x.lo1],
+  ['brk4Up', 'Uitbraak boven high van {4}', (W, w, x) => W[w].c > x.hi4],
+  ['brk4Down', 'Uitbraak onder low van {4}', (W, w, x) => W[w].c < x.lo4],
+  ['brkDUp', 'Uitbraak boven high van {D}', (W, w, x) => W[w].c > x.hiD],
+  ['brkDDown', 'Uitbraak onder low van {D}', (W, w, x) => W[w].c < x.loD],
   ['volSpike', 'Volume > 2× normaal', (W, w, x) => W[w].v > 2 * x.vAvg],
   ['quiet', 'Heel rustig (volume < 0,5× normaal)', (W, w, x) => W[w].v < 0.5 * x.vAvg],
 ];
@@ -938,7 +1045,7 @@ function winCtx(W, w) {
 }
 
 function buildPatternStats() {
-  const W = buildWindows(S.hist.candles);
+  const W = buildWindows(histCandles());
   if (W.length < 300) return null;
   const cutT = W[Math.floor(W.length * 0.7)].t;
   const stats = Object.fromEntries(PATTERNS.map(([id]) => [id, { all: [0, 0], tr: [0, 0], te: [0, 0] }]));
@@ -972,13 +1079,13 @@ function patVerdict(s) {
 
 function patternsLive() {
   const P = S.patterns;
-  if (!P || S.hist.loading) return null;
+  if (!P || S.hist.loading || S.hist.busy) return null;
   const now = Date.now(), ws = winStart(now);
-  const W = buildWindows(S.hist.candles.filter(c => c.t < ws));
+  const W = buildWindows(histCandles().filter(c => c.t < ws));
   const cur = S.klines.filter(c => c.t >= ws);
   if (!cur.length) return null;
   const price = S.price ?? cur[cur.length - 1].c;
-  const scale = WIN / Math.max(now - ws, MIN);     // lopend venster: volume doorrekenen naar 15 min
+  const scale = WIN / Math.max(now - ws, MIN);     // lopend venster: volume doorrekenen naar een heel venster
   W.push({
     t: ws, o: cur[0].o, c: price,
     h: Math.max(price, ...cur.map(c => c.h)), l: Math.min(price, ...cur.map(c => c.l)),
@@ -986,7 +1093,7 @@ function patternsLive() {
   });
   const w = W.length - 1, x = winCtx(W, w);
   if (!x) return null;
-  const active = PATTERNS.filter(([, , f]) => f(W, w, x)).map(([id, name]) => ({ id, name, s: P.stats[id], v: patVerdict(P.stats[id]) }));
+  const active = PATTERNS.filter(([, , f]) => f(W, w, x)).map(([id, name]) => ({ id, name: patName(name), s: P.stats[id], v: patVerdict(P.stats[id]) }));
   return { active, tod: P.tod[fmtTime(ws + WIN)], todKey: fmtTime(ws + WIN) };
 }
 
@@ -1026,8 +1133,8 @@ function keyLevels(a) {
   const ws = a.ws, price = a.sg.price;
   const lv = [];
   const add = (name, px, kind, show = true) => { if (px && isFinite(px)) lv.push({ name, px, kind, show }); };
-  const prev = rangeHL(k, ws - WIN, ws), hour = rangeHL(k, ws - 4 * WIN, ws), h4 = rangeHL(k, ws - 16 * WIN, ws);
-  const day = S.hist.candles.length ? rangeHL(S.hist.candles, ws - 96 * WIN, ws) : null;
+  const prev = rangeHL(k, ws - WIN, ws), hour = rangeHL(k, ws - 60 * MIN, ws), h4 = rangeHL(k, ws - 240 * MIN, ws);
+  const day = S.hist.candles.length ? rangeHL(S.hist.candles, ws - 1440 * MIN, ws) : null;
   if (prev) { add('High vorig venster', prev.h, 'high'); add('Low vorig venster', prev.l, 'low'); }
   if (hour) { add('High afgelopen uur', hour.h, 'high'); add('Low afgelopen uur', hour.l, 'low'); }
   if (h4) { add('High 4 uur', h4.h, 'high'); add('Low 4 uur', h4.l, 'low'); }
@@ -1089,9 +1196,10 @@ function renderLevels(a) {
 }
 
 function buildPatterns() {
-  if (S.hist.loading || S.hist.error) return;
+  if (S.hist.loading || S.hist.busy || S.hist.error) return;
   try { S.knn = buildKnn(); } catch (e) { S.knn = null; }
   try { S.patterns = buildPatternStats(); } catch (e) { S.patterns = null; }
+  S.patternsDone = true;
   renderPatternsAll();
 }
 
@@ -1105,7 +1213,8 @@ function analogue(k, z) {
   }
   for (const tol of [0.2, 0.35, 0.5]) {
     let n = 0, up = 0;
-    for (const s of sm) if (s.k > 0 && Math.abs(s.k - k) <= 1 && Math.abs(s.z - z) <= tol) { n++; if (s.up) up++; }
+    const kTol = Math.max(1, Math.round(WM / 15));
+    for (const s of sm) if (s.k > 0 && Math.abs(s.k - k) <= kTol && Math.abs(s.z - z) <= tol) { n++; if (s.up) up++; }
     if (n >= 40 || tol === 0.5) return { n, up, p: n ? up / n : null, tol };
   }
 }
@@ -1119,13 +1228,38 @@ function baseRate() {
 // ---------- Polymarket ----------
 const parseMaybeJson = x => typeof x === 'string' ? JSON.parse(x) : x;
 
+// Mogelijke namen (slugs) van de Polymarket-markt voor dit venster.
+// 5 en 15 min: btc-updown-5m-<start>, btc-updown-15m-<start>.
+// 1 uur: bitcoin-up-or-down-<maand>-<dag>[-<jaar>]-<uur><am|pm>-et (New York-tijd); het precieze formaat varieert.
+function pmSlugs(ws) {
+  if (TF.key !== '1h') return [`btc-updown-${TF.key}-${ws / 1000}`];
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', hour12: true,
+  }).formatToParts(new Date(ws)).map(p => [p.type, p.value]));
+  const m = parts.month.toLowerCase(), d = parts.day, y = parts.year, h = parts.hour, ap = (parts.dayPeriod || '').toLowerCase();
+  const base = 'bitcoin-up-or-down';
+  return [`${base}-${m}-${d}-${y}-${h}${ap}-et`, `${base}-${m}-${d}-${h}${ap}-et`, `${base}-${m}-${d}-${h}-${ap}-et`, `${base}-${m}-${d}-${y}-${h}-${ap}-et`];
+}
+
+async function findPmEvent(slugs) {
+  let lastErr = new Error('markt niet gevonden');
+  for (const slug of slugs) {
+    try {
+      const arr = await fetchJson(`${PM_GAMMA}/events?slug=${slug}`);
+      const ev = Array.isArray(arr) ? arr[0] : arr;
+      if (ev && ev.markets && ev.markets.length) return { ev, slug };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
 async function loadPolymarket(ws) {
-  const slug = `btc-updown-15m-${ws / 1000}`;
-  const pm = S.pm = { ws, slug, url: `https://polymarket.com/event/${slug}`, status: 'laden', tokens: null, up: null, down: null, priceToBeat: null };
+  const slugs = pmSlugs(ws), gen = S.gen;
+  const pm = S.pm = { ws, gen, slug: slugs[0], url: `https://polymarket.com/event/${slugs[0]}`, status: 'laden', tokens: null, up: null, down: null, priceToBeat: null };
   try {
-    const arr = await fetchJson(`${PM_GAMMA}/events?slug=${slug}`);
-    const ev = Array.isArray(arr) ? arr[0] : arr;
-    if (!ev || !ev.markets || !ev.markets.length) throw new Error('markt niet gevonden');
+    const { ev, slug } = await findPmEvent(slugs);
+    if (S.pm !== pm) return;
+    pm.slug = slug; pm.url = `https://polymarket.com/event/${slug}`;
     const m = ev.markets[0];
     const outcomes = parseMaybeJson(m.outcomes) || [];
     const prices = parseMaybeJson(m.outcomePrices) || [];
@@ -1172,7 +1306,7 @@ async function pollPolymarketBook() {
 function pmCost(side) {
   if (S.manualPm[side] != null) return S.manualPm[side];
   const pm = S.pm;
-  if (!pm || pm.ws !== S.curWs || !pm[side]) return null;
+  if (!pm || pm.ws !== S.curWs || pm.gen !== S.gen || !pm[side]) return null;
   return pm[side].ask ?? pm[side].mid ?? null;
 }
 
@@ -1181,8 +1315,10 @@ function currentOpen(ws) {
   if (S.manualOpen[ws] != null) return { px: S.manualOpen[ws], src: 'handmatig ingevuld' };
   const k = S.klines.find(c => c.t === ws);
   const binOpen = k ? k.o : (S.winFirstTrade && S.winFirstTrade.ws === ws && S.winFirstTrade.t - ws < 5000 ? S.winFirstTrade.p : null);
+  // Uurmarkten rekenen af op de Binance 1-uurs candle: de Binance-open ís dan de price to beat
+  if (TF.src === 'binance' && k) return { px: k.o, src: 'Binance 1-uurs candle (= bron van Polymarket)' };
   const pm = S.pm;
-  if (pm && pm.ws === ws && pm.priceToBeat && (!binOpen || Math.abs(pm.priceToBeat / binOpen - 1) < 0.02)) {
+  if (pm && pm.ws === ws && pm.gen === S.gen && pm.priceToBeat && (!binOpen || Math.abs(pm.priceToBeat / binOpen - 1) < 0.02)) {
     return { px: pm.priceToBeat, src: 'Polymarket (Chainlink)' };
   }
   if (binOpen) return { px: binOpen, src: k ? 'open van Binance-candle' : 'eerste Binance-trade' };
@@ -1262,16 +1398,21 @@ function analyze(now) {
 }
 
 // ---------- Track record (localStorage) ----------
-function trLoad() { try { return JSON.parse(localStorage.getItem(TR_KEY)) || []; } catch { return []; } }
-function trSave() { try { localStorage.setItem(TR_KEY, JSON.stringify(S.track.slice(-300))); } catch {} }
+function trLoad() { try { return JSON.parse(localStorage.getItem(trKey())) || []; } catch { return []; } }
+function trSave() { try { localStorage.setItem(trKey(), JSON.stringify(S.track.slice(-300))); } catch {} }
 
 function findCandle(t) {
-  return S.klines.find(c => c.t === t) || S.hist.candles.find(c => c.t === t) || null;
+  const k = S.klines.find(c => c.t === t);
+  if (k) return k;
+  const h = S.hist.candles;               // oplopend gesorteerd: binair zoeken
+  let lo = 0, hi = h.length - 1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (h[mid].t === t) return h[mid]; if (h[mid].t < t) lo = mid + 1; else hi = mid - 1; }
+  return null;
 }
 
 function trackTick(now, a) {
   const elapsed = (now - a.ws) / MIN;
-  for (const cp of CHECKPOINTS) {
+  for (const cp of TF.checkpoints) {
     if (elapsed < cp || elapsed >= cp + 0.5) continue;
     const p = cp === 0 ? a.pPre : a.pSig;     // checkpoint 0 = voorspelling vooraf
     if (p == null) continue;
@@ -1289,10 +1430,10 @@ function resolveTrack(now) {
   let changed = false;
   for (const x of S.track) {
     if (x.res || now < x.ws + WIN + 3000) continue;
-    const c = findCandle(x.ws + 14 * MIN);
+    const c = findCandle(x.ws + (WM - 1) * MIN);
     const open = x.open ?? (findCandle(x.ws) || {}).o;
     if (c && open) { x.close = c.c; x.res = c.c >= open ? 'UP' : 'DOWN'; changed = true; }
-    else if (!S.hist.loading && now - x.ws > (HIST_DAYS - 1) * 24 * 60 * MIN) { x.res = 'onbekend'; changed = true; }
+    else if (!S.hist.loading && !S.hist.busy && now - x.ws > (TF.histDays - 1) * 24 * 60 * MIN) { x.res = 'onbekend'; changed = true; }
   }
   if (changed) trSave();
 }
@@ -1328,6 +1469,12 @@ function renderHero(a, now) {
   renderVerdict(a, price);
 }
 
+// Chainlink-markten (5/15 min): vlak bij de open kan het verschil Binance ↔ Chainlink de uitslag bepalen
+function nearOpenRisk(a, price) {
+  return TF.src === 'chainlink' && price && a.op && Math.abs(price - a.op.px) < NEAR_OPEN_USD &&
+    a.op.src !== 'handmatig ingevuld' && !a.op.src.startsWith('Polymarket');
+}
+
 function renderVerdict(a, price) {
   const el = $('verdict');
   if (a.pSig == null) { el.textContent = S.klines.length ? 'Wachten op de open van dit venster…' : 'Data laden…'; return; }
@@ -1338,7 +1485,7 @@ function renderVerdict(a, price) {
   else if (d < 0.3) head = `Duidelijke voorkeur voor ${side}.`;
   else head = `Sterke voorkeur voor ${side}.`;
   const notes = [];
-  if (a.minsLeft > 10) notes.push('Nog veel tijd over: de kans kan snel omslaan.');
+  if (a.minsLeft > WM * 2 / 3) notes.push('Nog veel tijd over: de kans kan snel omslaan.');
   const sg = a.sg;
   if (Math.abs(sg.score) > 0.35 && Math.sign(sg.score) !== Math.sign(a.z) && Math.abs(a.z) > 0.2) {
     notes.push(`Let op: de prijs staat ${a.z > 0 ? 'boven' : 'onder'} de open, maar de order flow/signalen wijzen de andere kant op.`);
@@ -1348,7 +1495,7 @@ function renderVerdict(a, price) {
   b.className = d < 0.06 ? '' : side === 'UP' ? 'up-c' : 'down-c';
   el.appendChild(b);
   for (const n of notes) { const div = document.createElement('div'); div.className = 'small muted'; div.textContent = n; el.appendChild(div); }
-  if (price && Math.abs(price - a.op.px) < NEAR_OPEN_USD && a.op.src !== 'handmatig ingevuld' && !a.op.src.startsWith('Polymarket')) {
+  if (nearOpenRisk(a, price)) {
     const w = document.createElement('div'); w.className = 'warnline small';
     w.textContent = `Prijs ligt minder dan $${NEAR_OPEN_USD} van de open. Polymarket rekent met Chainlink, niet Binance — vul de echte price to beat in voor zekerheid.`;
     el.appendChild(w);
@@ -1369,7 +1516,7 @@ function renderBreakdown(a) {
       : `${an.n} vergelijkbare momenten, marge ${fmtPct(lo, 0)}–${fmtPct(hi, 0)}`;
   } else {
     $('pHist').textContent = '–'; setPbar('bHist', null);
-    $('analogSub').textContent = S.hist.loading ? 'laatste 21 dagen laden…' : (S.hist.error ? 'historie niet beschikbaar' : 'te weinig vergelijkbare momenten');
+    $('analogSub').textContent = S.hist.loading || S.hist.busy ? 'historie laden…' : (S.hist.error ? 'historie niet beschikbaar' : 'te weinig vergelijkbare momenten');
   }
 }
 
@@ -1384,8 +1531,9 @@ function renderPM(a) {
     st.append(pm.updated ? `Live, bijgewerkt ${Math.round((Date.now() - pm.updated) / 1000)} s geleden · ` : 'Gevonden · ', link);
   }
   const fmtSide = s => s ? `${cents(s.bid)} / ${cents(s.ask)}` + (s.bid == null && s.ask == null ? ` (mid ${cents(s.mid)})` : '') : '–';
-  $('pmUp').textContent = pm && pm.ws === a.ws ? fmtSide(pm.up) : '–';
-  $('pmDown').textContent = pm && pm.ws === a.ws ? fmtSide(pm.down) : '–';
+  const pmNow = pm && pm.ws === a.ws && pm.gen === S.gen;
+  $('pmUp').textContent = pmNow ? fmtSide(pm.up) : '–';
+  $('pmDown').textContent = pmNow ? fmtSide(pm.down) : '–';
 
   const edgeEl = $('edge');
   const p = a.pSig, cu = pmCost('up'), cd = pmCost('down');
@@ -1445,7 +1593,7 @@ function renderIndicators(a) {
   const vw = $('vVwap');
   if (sg.vwap) { const d = sg.price - sg.vwap; vw.textContent = (d >= 0 ? 'boven ' : 'onder ') + fmtUsd(Math.abs(d), 0); colorize(vw, d); }
   else vw.textContent = '–';
-  $('vVol').textContent = '±' + fmtUsd(sg.price * sg.sigma * Math.sqrt(15), 0);
+  $('vVol').textContent = '±' + fmtUsd(sg.price * sg.sigma * Math.sqrt(WM), 0);
   setMeter('mScore', sg.score); $('vScore').textContent = fmtSigned(sg.score, 2);
   colorize($('vScore'), sg.score);
 }
@@ -1463,7 +1611,7 @@ function renderNext(a, now) {
   if (a.next) {
     for (const { k, v } of [...a.next.parts].sort((x, y) => Math.abs(y.v) - Math.abs(x.v)).slice(0, 4)) {
       const row = document.createElement('div'); row.className = 'row';
-      const l = document.createElement('span'); l.textContent = FEAT_NAMES[k];
+      const l = document.createElement('span'); l.textContent = featName(k);
       const mt = document.createElement('span'); mt.className = 'meter'; const i = document.createElement('i'); i.id = 'why-' + k; mt.appendChild(i);
       const r = document.createElement('span'); r.className = 'val mono ' + (v >= 0 ? 'up-c' : 'down-c'); r.textContent = v >= 0 ? '→ UP' : '→ DOWN';
       row.append(l, mt, r); why.appendChild(row);
@@ -1484,7 +1632,7 @@ function renderModel() {
   if (!m) return;
   if (m.error) { $('modelSum').textContent = 'Model niet getraind: ' + m.error + '.'; return; }
   const pv = m.preVal, iv = m.inVal;
-  $('modelSum').textContent = `Getraind op ${m.windows} vensters (${HIST_DAYS} dagen), om ${fmtTime(m.trainedAt)}. Wordt elk uur opnieuw getraind. ` +
+  $('modelSum').textContent = `Getraind op ${m.windows} vensters van ${TF.label} (${TF.histDays} dagen), om ${fmtTime(m.trainedAt)}. Wordt elk uur opnieuw getraind. ` +
     (m.useInw ? 'In het venster gebruikt de hoofdbalk het geleerde model (was in de test beter dan puur statistiek).' : 'In het venster was het geleerde model in de test niet beter dan puur statistiek, dus de hoofdbalk gebruikt statistiek + vuistregels.');
   const row = (name, v, extra) => `<tr><td>${name}</td><td class="mono">${fmtPct(v.acc, 1)}</td><td class="mono ${v.brier < v.brierBase ? 'ok' : 'bad'}">${v.brier.toFixed(4)}</td><td class="mono muted">${v.brierBase.toFixed(4)}</td><td class="mono muted">${v.n}</td></tr>` + (extra || '');
   $('modelVal').innerHTML =
@@ -1496,7 +1644,7 @@ function renderModel() {
   wEl.innerHTML = '';
   PRE_FEATS.map((k, i) => ({ k, w: m.pre.w[i] })).sort((x, y) => Math.abs(y.w) - Math.abs(x.w)).forEach(({ k, w }) => {
     const row = document.createElement('div'); row.className = 'row';
-    const l = document.createElement('span'); l.textContent = FEAT_NAMES[k];
+    const l = document.createElement('span'); l.textContent = featName(k);
     const mt = document.createElement('span'); mt.className = 'meter'; const i = document.createElement('i'); i.id = 'w-' + k; mt.appendChild(i);
     const r = document.createElement('span'); r.className = 'val mono'; r.textContent = fmtSigned(w, 3);
     row.append(l, mt, r); wEl.appendChild(row);
@@ -1505,13 +1653,20 @@ function renderModel() {
 }
 
 function retrain() {
-  if (S.hist.loading || S.hist.error) return;
+  if (S.hist.loading || S.hist.busy || S.hist.error) return;
+  const gen = S.gen;               // na een wissel van tijdsframe worden oude resultaten weggegooid
   $('modelSum').textContent = 'Model trainen…';
   $('knnSub').textContent = 'patronen zoeken in de historie…';
   setTimeout(() => {
+    if (gen !== S.gen) return;
     try { trainModels(); } catch (e) { S.model = { error: e.message }; }
     renderModel();
-    setTimeout(() => { buildPatterns(); renderPatternsLive(); }, 50);
+    renderEntry();
+    setTimeout(() => {
+      if (gen !== S.gen) return;
+      buildPatterns();
+      renderPatternsLive();
+    }, 50);
   }, 50);
 }
 
@@ -1522,7 +1677,7 @@ function renderPatternsAll() {
   if (!P) { $('patAll').innerHTML = '<tr><td colspan="4" class="muted">niet beschikbaar</td></tr>'; return; }
   $('patAll').innerHTML = PATTERNS.map(([id, name]) => {
     const s = P.stats[id], v = patVerdict(s);
-    return `<tr><td class="wrap">${name}</td>${pctCell(s.all[1], s.all[0])}<td class="mono muted">${s.all[0]}</td><td class="mono">${s.tr[0] ? fmtPct(s.tr[1] / s.tr[0], 0) : '–'} / ${s.te[0] ? fmtPct(s.te[1] / s.te[0], 0) : '–'} <span class="${v.mark === '✓' ? 'ok' : v.mark === '✗' ? 'bad' : 'muted'}">${v.mark}</span></td></tr>`;
+    return `<tr><td class="wrap">${patName(name)}</td>${pctCell(s.all[1], s.all[0])}<td class="mono muted">${s.all[0]}</td><td class="mono">${s.tr[0] ? fmtPct(s.tr[1] / s.tr[0], 0) : '–'} / ${s.te[0] ? fmtPct(s.te[1] / s.te[0], 0) : '–'} <span class="${v.mark === '✓' ? 'ok' : v.mark === '✗' ? 'bad' : 'muted'}">${v.mark}</span></td></tr>`;
   }).join('');
 }
 
@@ -1532,10 +1687,10 @@ function renderPatternsLive() {
   S.knnNow = r;
   if (r) {
     $('pKnn').textContent = fmtPct(r.p); setPbar('bKnn', r.p);
-    $('knnSub').textContent = `${r.ups} van de ${r.n} meest gelijkende momenten eindigden 15 min later hoger`;
+    $('knnSub').textContent = `${r.ups} van de ${r.n} meest gelijkende momenten eindigden ${TF.label} later hoger`;
   } else {
     $('pKnn').textContent = '–'; setPbar('bKnn', null);
-    if (!S.hist.loading && !K) $('knnSub').textContent = S.hist.error ? 'historie niet beschikbaar' : 'te weinig historie';
+    if (!S.hist.loading && !S.hist.busy && !K && S.patternsDone) $('knnSub').textContent = S.hist.error ? 'historie niet beschikbaar' : 'te weinig historie';
   }
   if (K) {
     const v = K.val, useful = v.acc >= 0.52 && v.brier < v.brierBase;
@@ -1571,24 +1726,24 @@ function drawKnn(r) {
   const K = S.knn;
   const col = { text: cssVar('--muted'), grid: cssVar('--grid'), up: cssVar('--up'), down: cssVar('--down'), accent: cssVar('--accent') };
   ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-  if (!r || !K) { ctx.fillStyle = col.text; ctx.fillText(S.hist.loading ? 'Historie laden…' : 'Nog geen patronen beschikbaar', 10, 20); return; }
-  const c = S.hist.candles, sig = K.sig;
+  if (!r || !K) { ctx.fillStyle = col.text; ctx.fillText(S.hist.loading || S.hist.busy || !S.patternsDone ? 'Historie laden…' : 'Nog geen patronen beschikbaar', 10, 20); return; }
+  const c = K.c, sig = K.sig, L = TF.knnL;
   const paths = r.idx.slice(0, 10).map(i => {
     const j = K.lib[i].j, s = sig[j];
-    return { up: K.lib[i].up, pts: Array.from({ length: KNN_L + 15 }, (_, m) => Math.log(c[j - KNN_L + 1 + m].c / c[j].c) / s) };
+    return { up: K.lib[i].up, pts: Array.from({ length: L + WM }, (_, m) => Math.log(c[j - L + 1 + m].c / c[j].c) / s) };
   });
   let lo = Math.min(...r.now), hi = Math.max(...r.now);
   for (const p of paths) for (const v of p.pts) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
   const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
   const padL = 30, padR = 8, padT = 8, padB = 20;
-  const X = m => padL + m / (KNN_L + 14) * (w - padL - padR);
+  const X = m => padL + m / (L + WM - 1) * (w - padL - padR);
   const Y = v => padT + (hi - v) / (hi - lo) * (h - padT - padB);
   ctx.strokeStyle = col.grid; ctx.lineWidth = 1; ctx.fillStyle = col.text;
   ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(w - padR, Y(0)); ctx.stroke();
-  const x0 = X(KNN_L - 1);
+  const x0 = X(L - 1);
   ctx.beginPath(); ctx.moveTo(x0, padT); ctx.lineTo(x0, h - padB); ctx.stroke();
   ctx.textAlign = 'center';
-  ctx.fillText('−30 min', X(0) + 20, h - 5); ctx.fillText('nu', x0, h - 5); ctx.fillText('+15 min', X(KNN_L + 14) - 22, h - 5);
+  ctx.fillText('−' + durText(L), X(0) + 22, h - 5); ctx.fillText('nu', x0, h - 5); ctx.fillText('+' + durText(WM), X(L + WM - 1) - 24, h - 5);
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   ctx.fillText('0σ', padL - 4, Y(0));
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -1610,7 +1765,7 @@ function renderRecent(now) {
   const cur = winStart(now);
   for (let i = 1; i <= 8; i++) {
     const ws = cur - i * WIN;
-    const o = S.klines.find(c => c.t === ws), c = S.klines.find(c => c.t === ws + 14 * MIN);
+    const o = findCandle(ws), c = findCandle(ws + (WM - 1) * MIN);
     if (!o || !c) continue;
     const d = c.c - o.o, up = d >= 0;
     rows.push(`<tr><td class="mono">${fmtTime(ws)}–${fmtTime(ws + WIN)}</td><td class="mono">${fmtUsd(o.o, 0)}</td><td class="mono">${fmtUsd(c.c, 0)}</td><td class="mono ${up ? 'up-c' : 'down-c'}">${sign(d)}${Math.abs(d).toFixed(0)}</td><td><span class="chip ${up ? 'up' : 'down'}">${up ? 'UP' : 'DOWN'}</span></td></tr>`);
@@ -1628,10 +1783,10 @@ function renderTrack() {
     return `<td class="mono ${hit ? 'ok' : 'bad'}">${fmtPct(p, 0)} ${hit ? '✓' : '✗'}</td>`;
   };
   const resCell = res => known(res) ? `<span class="chip ${res === 'UP' ? 'up' : 'down'}">${res}</span>` : `<span class="muted">${res ? 'onbekend' : 'loopt'}</span>`;
-  $('track').innerHTML = list.map(e => `<tr><td class="mono">${new Date(e.ws).toLocaleDateString('nl-NL', { day: 'numeric', month: 'numeric' })} ${fmtTime(e.ws)}</td>${CHECKPOINTS.map(cp => cell(e.p[cp], e.res)).join('')}<td>${resCell(e.res)}</td></tr>`).join('');
+  $('track').innerHTML = list.map(e => `<tr><td class="mono">${new Date(e.ws).toLocaleDateString('nl-NL', { day: 'numeric', month: 'numeric' })} ${fmtTime(e.ws)}</td>${TF.checkpoints.map(cp => cell(e.p[cp], e.res)).join('')}<td>${resCell(e.res)}</td></tr>`).join('');
   const done = S.track.filter(e => known(e.res));
-  if (!done.length) return;
-  const parts = CHECKPOINTS.map(cp => {
+  if (!done.length) { $('trackSum').textContent = 'Wordt opgebouwd zolang deze pagina open staat: de voorspelling vooraf en de kans op een paar momenten in het venster worden bewaard en na afloop vergeleken met de uitslag.'; return; }
+  const parts = TF.checkpoints.map(cp => {
     const xs = done.filter(e => e.p[cp] != null);
     if (!xs.length) return null;
     const hits = xs.filter(e => (e.p[cp] >= 0.5) === (e.res === 'UP')).length;
@@ -1659,7 +1814,7 @@ function renderCalib() {
   const windows = sm.filter(s => s.k === 0).length;
   $('calibSum').textContent = `${windows} vensters, ${n} momenten. Brier-score ${(brier / n).toFixed(3)} (lager is beter; 0,25 = gokken). Klopt het model, dan liggen "gem." en "werkelijk UP" dicht bij elkaar.`;
   $('calib').innerHTML = buckets.map((b, i) => b.n ? `<tr><td class="mono">${i * 10}–${i * 10 + 10}%</td><td class="mono">${fmtPct(b.ps / b.n)}</td><td class="mono">${fmtPct(b.up / b.n)}</td><td class="mono muted">${b.n}</td></tr>` : '').join('');
-  const ks = [1, 3, 5, 7, 10, 12, 14].filter(k => byK[k]);
+  const ks = TF.calibKs.filter(k => byK[k]);
   $('hitHead').innerHTML = '<th>minuut</th>' + ks.map(k => `<th>${k}</th>`).join('');
   $('hitRow').innerHTML = '<td class="muted">goed</td>' + ks.map(k => `<td class="mono">${fmtPct(byK[k].hit / byK[k].n, 0)}</td>`).join('');
 }
@@ -1676,7 +1831,7 @@ function drawChart(a) {
   const col = { text: cssVar('--muted'), grid: cssVar('--grid'), up: cssVar('--up'), down: cssVar('--down'), accent: cssVar('--accent'), win: cssVar('--win-bg'), upSoft: cssVar('--up-soft'), downSoft: cssVar('--down-soft'), panel: cssVar('--panel') };
 
   const now = Date.now(), ws = a.ws, we = a.we;
-  const back = w < 500 ? 25 : 45;
+  const back = { 5: w < 500 ? 15 : 30, 15: w < 500 ? 25 : 45, 60: w < 500 ? 45 : 120 }[WM] || 45;
   const tStart = ws - back * MIN, tEnd = we;
   const cs = S.klines.filter(c => c.t >= tStart && c.t < tEnd);
   if (!cs.length) return;
@@ -1714,7 +1869,8 @@ function drawChart(a) {
     ctx.fillText(p.toLocaleString('en-US', { maximumFractionDigits: step < 1 ? 2 : 0 }), w - padR + 6, y);
   }
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center';
-  for (let t = Math.ceil(tStart / WIN) * WIN; t <= tEnd; t += WIN) {
+  const lblStep = Math.max(WIN, 15 * MIN);
+  for (let t = Math.ceil(tStart / lblStep) * lblStep; t <= tEnd; t += lblStep) {
     const x = Math.round(X(t)) + 0.5;
     ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
     ctx.fillText(fmtTime(t), clamp(x, 18, w - padR - 18), h - 6);
@@ -1776,6 +1932,167 @@ function drawChart(a) {
   }
 }
 
+// ---------- Koopadvies ----------
+// Instap-statistiek uit de historie: per moment in het venster, als het statistische model
+// minstens `th` zeker was van een kant — hoe vaak kwam dat voor en hoe vaak klopte het?
+function entryStats(th) {
+  const key = TF.key + ':' + th;
+  if (S.entryCache[key]) return S.entryCache[key];
+  const sm = S.hist.samples;
+  if (!sm.length) return null;
+  const windows = sm.filter(s => s.k === 0).length;
+  const acc = {};
+  for (const k of TF.entryKs) acc[k] = { k, n: 0, hit: 0, conf: 0 };
+  for (const s of sm) {
+    const r = acc[s.k];
+    if (!r) continue;
+    const p = soften(Phi(s.z)), conf = Math.max(p, 1 - p);
+    if (conf < th) continue;
+    r.n++; r.conf += conf;
+    if ((p >= 0.5) === s.up) r.hit++;
+  }
+  const rows = TF.entryKs.map(k => {
+    const r = acc[k];
+    return { ...r, freq: windows ? r.n / windows : 0, rate: r.n ? r.hit / r.n : null, lo: r.n ? wilson(r.hit, r.n)[0] : null, conf: r.n ? r.conf / r.n : null };
+  });
+  return (S.entryCache[key] = { windows, rows });
+}
+
+// Wat betaal je maximaal en wat win je dan? margin = min. voordeel + fee (in kanspunten)
+function priceMath(rate) {
+  const { edge, fee } = S.cfg;
+  const maxPrice = rate - edge - fee;
+  const eff = maxPrice + fee;                     // werkelijke kosten per share incl. fee/slippage
+  return { maxPrice, winReturn: maxPrice > 0 ? (1 - eff) / eff : null };
+}
+
+function renderEntry() {
+  const tb = $('entryTbl');
+  const st = entryStats(S.cfg.th);
+  if (!st) { tb.innerHTML = `<tr><td colspan="5" class="muted">${S.hist.error ? 'Historie niet beschikbaar' : 'Historie laden…'}</td></tr>`; return; }
+  const rows = st.rows.filter(r => r.n >= 10);
+  // Hoogste slagingskans (met genoeg voorbeelden) en het vroegste moment dat jouw minimum haalt (meer rendement)
+  const solid = rows.filter(r => r.n >= 30 && r.freq >= 0.1);
+  const bestRate = solid.slice().sort((x, y) => y.lo - x.lo)[0];
+  const bestRet = solid.filter(r => r.lo >= S.cfg.minP && priceMath(r.rate).maxPrice > 0).sort((x, y) => x.k - y.k)[0];
+  const m = S.model, pv = m && m.preVal;
+  const preRow = pv && pv.selN ? (() => {
+    const pm = priceMath(pv.selAcc);
+    return `<tr><td>vooraf (vóór de start)</td><td class="mono">${fmtPct(pv.selN / pv.n, 0)}</td><td class="mono ${pv.selAcc >= S.cfg.minP ? 'ok' : 'bad'}">${fmtPct(pv.selAcc, 0)}</td><td class="mono">${pm.maxPrice > 0 ? cents(pm.maxPrice) : '–'}</td><td class="mono">${pm.winReturn != null ? '+' + fmtPct(pm.winReturn, 0) : '–'}</td></tr>`;
+  })() : '';
+  tb.innerHTML = preRow + (rows.map(r => {
+    const pm = priceMath(r.rate);
+    const cls = r === bestRet ? ' class="best"' : '';
+    return `<tr${cls}><td>na ${r.k} min <span class="muted">(nog ${WM - r.k})</span></td><td class="mono">${fmtPct(r.freq, 0)}</td>` +
+      `<td class="mono ${r.lo >= S.cfg.minP ? 'ok' : r.rate < S.cfg.minP ? 'bad' : ''}">${fmtPct(r.rate, 0)} <span class="muted">(n=${r.n})</span></td>` +
+      `<td class="mono">${pm.maxPrice > 0 ? cents(pm.maxPrice) : '–'}</td><td class="mono">${pm.winReturn != null ? '+' + fmtPct(pm.winReturn, 0) : '–'}</td></tr>`;
+  }).join('') || `<tr><td colspan="5" class="muted">Te weinig momenten waarop het model ≥ ${fmtPct(S.cfg.th, 0)} zeker was.</td></tr>`);
+  const parts = [];
+  if (bestRate) parts.push(`Hoogste slagingskans: na ${bestRate.k} min (${fmtPct(bestRate.rate, 0)} goed, komt in ${fmtPct(bestRate.freq, 0)} van de vensters voor).`);
+  if (bestRet) parts.push(`Beste rendement dat nog jouw minimum van ${fmtPct(S.cfg.minP, 0)} haalt: na ${bestRet.k} min — koop alleen als de prijs ≤ ${cents(priceMath(bestRet.rate).maxPrice)} is (groen gemarkeerd).`);
+  else parts.push(`Geen moment haalt betrouwbaar jouw minimum van ${fmtPct(S.cfg.minP, 0)} bij deze zekerheid — kies een hogere zekerheid of verlaag je minimum.`);
+  if (pv && pv.selN) parts.push(`Vooraf (vóór de start) zat het model bij duidelijke voorspellingen ${fmtPct(pv.selAcc, 0)} goed — ${pv.selAcc >= S.cfg.minP ? 'dat haalt je minimum' : 'meestal te onzeker om vooraf te kopen'}.`);
+  $('entrySum').textContent = parts.join(' ');
+}
+
+// Live koopadvies voor het huidige venster
+function computeAdvice(a, now) {
+  if (a.pSig == null || !a.sg) return { state: 'wait', head: 'Wachten…', text: S.klines.length ? 'Wachten op de open van dit venster.' : 'Data laden…', checks: [] };
+  const up = a.pSig >= 0.5, side = up ? 'UP' : 'DOWN';
+  const pModel = up ? a.pSig : 1 - a.pSig;
+  const an = S.analog && !S.analog.base && S.analog.p != null && S.analog.n >= 30 ? (up ? S.analog.p : 1 - S.analog.p) : null;
+  const pHat = an != null ? Math.min(pModel, an) : pModel;          // conservatief: de laagste van model en historie
+  const cost = pmCost(up ? 'up' : 'down');
+  const { maxPrice } = priceMath(pHat);
+  const secsLeft = (a.we - now) / 1000;
+  const sg = a.sg, score = up ? sg.score : -sg.score;
+  const sweepAgainst = (S.levels || []).some(l => l.status === 'sweep' && (up ? l.kind === 'high' : l.kind === 'low'));
+  const checks = [
+    { ok: pHat >= S.cfg.minP, text: `Slagingskans ${side} ${fmtPct(pHat, 0)} ≥ jouw minimum ${fmtPct(S.cfg.minP, 0)}` + (an != null ? ' (laagste van model en historie)' : '') },
+    { ok: an != null && an >= Math.min(S.cfg.minP, pModel) - 0.1, text: an != null ? `Historie bevestigt: vergelijkbare momenten ${fmtPct(an, 0)} ${side}` : 'Historie: nog te weinig vergelijkbare momenten' },
+    { ok: score > -0.15, text: `Order flow en chart-signalen niet tegen ${side} (score ${fmtSigned(score, 2)})` },
+    { ok: !sweepAgainst, text: sweepAgainst ? `Er was een sweep tegen ${side} in (zie Highs & lows)` : 'Geen sweep tegen je richting in' },
+    { ok: !nearOpenRisk(a, a.sg.price), text: nearOpenRisk(a, a.sg.price) ? 'Prijs te dicht bij de open (Chainlink-risico) — vul de price to beat in' : 'Prijs ver genoeg van de open' },
+    { ok: secsLeft >= 15, text: secsLeft >= 15 ? 'Genoeg tijd om de order te plaatsen' : 'Minder dan 15 s over — order komt mogelijk niet meer door' },
+    { ok: cost != null && maxPrice > 0 && cost <= maxPrice, price: true,
+      text: cost == null ? 'Polymarket-prijs onbekend — vul hem in bij "Polymarket vergelijking"' : `Prijs ${side} ${cents(cost)} ≤ max ${maxPrice > 0 ? cents(maxPrice) : '–'}` },
+  ];
+  const allButPrice = checks.filter(c => !c.price).every(c => c.ok);
+  const all = allButPrice && checks.find(c => c.price).ok;
+  const res = { side, pHat, cost, maxPrice, checks, up };
+  if (cost != null) {
+    const eff = cost + S.cfg.fee;
+    res.ev = pHat / eff - 1;
+    res.winReturn = (1 - eff) / eff;
+    res.kelly = clamp((pHat - eff) / (1 - eff) / 4, 0, 0.05);   // kwart-Kelly, max 5% van je potje
+  }
+  if (all) return { ...res, state: up ? 'buy-up' : 'buy-down', head: `KOOP ${side}`, text: `Tot max ${cents(maxPrice)} per share.` };
+  if (allButPrice && maxPrice > 0) return { ...res, state: 'almost', head: `${side} interessant — wacht op prijs`, text: `Koop alleen als ${side} ≤ ${cents(maxPrice)} kost${cost != null ? ` (nu ${cents(cost)})` : ''}.` };
+  return { ...res, state: 'wait', head: 'WACHTEN', text: 'Nog niet alle voorwaarden voldaan — zie de controle hieronder.' };
+}
+
+function renderAdvice(a, now) {
+  const adv = computeAdvice(a, now);
+  const box = $('signal');
+  box.className = 'signal' + (adv.state === 'wait' ? '' : ' ' + adv.state);
+  $('sigHead').textContent = adv.head;
+  $('sigHead').className = 'head' + (adv.state === 'buy-up' ? ' up-c' : adv.state === 'buy-down' ? ' down-c' : adv.state === 'almost' ? ' warn-c' : '');
+  $('sigText').textContent = adv.text;
+  $('checks').innerHTML = adv.checks.map(c => `<li><span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</span><span></span></li>`).join('');
+  [...$('checks').children].forEach((li, i) => { li.lastChild.textContent = adv.checks[i].text; });
+  const nums = $('adviceNums');
+  if (adv.pHat == null) { nums.textContent = '–'; return; }
+  const lines = [`Conservatieve slagingskans ${adv.side}: ${fmtPct(adv.pHat, 0)} · max prijs ${adv.maxPrice > 0 ? cents(adv.maxPrice) : '– (te onzeker)'}.`];
+  if (adv.ev != null) {
+    lines.push(`Bij ${cents(adv.cost)} + ${Math.round(S.cfg.fee * 100)}pt fee: winst als het goed gaat +${fmtPct(adv.winReturn, 0)}, verwachte waarde ${adv.ev >= 0 ? '+' : '−'}${fmtPct(Math.abs(adv.ev), 1)} per inzet.`);
+    lines.push(adv.kelly > 0 ? `Voorzichtige inzet: max ${fmtPct(adv.kelly, 1)} van je potje (kwart-Kelly).` : 'Inzet: niets — bij deze prijs is er geen voordeel.');
+  }
+  nums.textContent = lines.join(' ');
+}
+
+// ---------- Tijdsframe wisselen ----------
+function applyTfLabels() {
+  document.title = `BTC ${TF.label} Up/Down Analyzer`;
+  $('appTitle').textContent = `BTC ${TF.label} Up/Down Analyzer`;
+  for (const b of $('tfTabs').children) { const on = b.dataset.tf === TF.key; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); }
+  document.querySelectorAll('.histDays').forEach(el => { el.textContent = TF.histDays; });
+  $('trackHead').innerHTML = '<th>Venster</th>' + TF.checkpoints.map(cp => `<th>${cp ? `na ${cp}m` : 'vooraf'}</th>`).join('') + '<th>Uitslag</th>';
+  $('knnLabel').textContent = `Meest gelijkende chartvormen uit de laatste ${TF.histDays} dagen (prijs + order flow, laatste ${durText(TF.knnL)}) en wat er ${TF.label} later gebeurde`;
+  const starts = { '5m': 'elke 5 minuten (:00, :05, :10, …)', '15m': 'elk kwartier (:00, :15, :30, :45)', '1h': 'elk heel uur' }[TF.key];
+  $('exMarket').innerHTML = `<strong>De markt:</strong> bij Polymarket "Bitcoin Up or Down – ${TF.label}" wint UP als de prijs aan het eind van het venster <em>gelijk aan of hoger</em> is dan aan het begin ("price to beat"). Vensters starten ${starts}. Polymarket rekent met New York-tijd; 18:00 hier = 12:00 ET.`;
+  $('exSource').innerHTML = TF.src === 'binance'
+    ? '<strong>Prijsbron:</strong> de uurmarkten rekenen af op de <em>Binance BTC/USDT 1-uurs candle</em> — precies de data die deze pagina gebruikt, dus de price to beat klopt hier exact.'
+    : '<strong>Prijsbron:</strong> de 5- en 15-minutenmarkten rekenen af met de Chainlink BTC/USD-feed, deze pagina gebruikt Binance BTC/USDT. Die verschillen meestal een paar tot tientallen dollars. Staat de prijs vlak bij de open, dan kan dat verschil de uitslag bepalen — vul dan de echte price to beat van Polymarket in.';
+}
+
+function resetTfViews() {
+  $('modelSum').textContent = 'Wacht op historie…';
+  $('modelVal').innerHTML = ''; $('modelW').innerHTML = '';
+  $('patAll').innerHTML = ''; $('patActive').innerHTML = '<tr><td colspan="4" class="muted">wacht op historie…</td></tr>';
+  $('patSum').textContent = '–'; $('knnVal').textContent = ''; $('knnSub').textContent = 'wacht op historie…';
+  $('pKnn').textContent = '–'; setPbar('bKnn', null);
+  $('calib').innerHTML = ''; $('hitHead').innerHTML = ''; $('hitRow').innerHTML = '';
+  $('entryTbl').innerHTML = '<tr><td colspan="5" class="muted">Historie laden…</td></tr>'; $('entrySum').textContent = '–';
+  $('openInput').value = ''; $('pmUpIn').value = ''; $('pmDownIn').value = '';
+  $('track').innerHTML = '';
+}
+
+function setTF(key, initial) {
+  if (!TIMEFRAMES[key]) key = '15m';
+  if (!initial && key === TF.key) return;
+  TF = TIMEFRAMES[key]; WIN = TF.min * MIN; WM = TF.min;
+  S.gen++;
+  S.curWs = null; S.manualOpen = {}; S.manualPm = { up: null, down: null }; S.winFirstTrade = null;
+  S.model = null; S.knn = null; S.patterns = null; S.patternsDone = false; S.analog = null; S.knnNow = null;
+  S.entryCache = {}; S.pm = null; S.hist.samples = [];
+  S.track = trLoad();
+  try { localStorage.setItem(TF_KEY, key); } catch {}
+  try { if (location.hash.slice(1) !== key) history.replaceState(null, '', '#' + key); } catch {}
+  applyTfLabels();
+  resetTfViews();
+  if (!initial) { ensureHistory(); tick(); slowTick(); }
+}
+
 // ---------- Hoofdlus ----------
 function onNewWindow(ws) {
   const first = S.curWs == null;
@@ -1784,7 +2101,7 @@ function onNewWindow(ws) {
   $('pmUpIn').value = ''; $('pmDownIn').value = '';
   if (!first) {
     $('openInput').value = '';
-    rebuildSamples(); renderCalib();
+    rebuildSamples(); renderCalib(); renderEntry();
     if (ws % (60 * MIN) === 0) retrain();     // elk heel uur opnieuw leren
   }
   loadPolymarket(ws);
@@ -1803,6 +2120,7 @@ function tick() {
   renderIndicators(a);
   renderNext(a, now);
   renderLevels(a);
+  renderAdvice(a, now);
   drawChart(a);
   trackTick(now, a);
 }
@@ -1811,7 +2129,7 @@ function slowTick() {
   const now = Date.now();
   pruneTrades(now);
   const a = S.last;
-  S.analog = a && a.z != null ? analogue(clamp(Math.round(15 - a.minsLeft), 0, 14), a.z) : analogue(0, 0);
+  S.analog = a && a.z != null ? analogue(clamp(Math.round(WM - a.minsLeft), 0, WM - 1), a.z) : analogue(0, 0);
   resolveTrack(now);
   renderPatternsLive();
   renderRecent(now);
@@ -1829,10 +2147,37 @@ function wireUi() {
   $('pmUpIn').addEventListener('input', e => { S.manualPm.up = parseCents(e.target.value); });
   $('pmDownIn').addEventListener('input', e => { S.manualPm.down = parseCents(e.target.value); });
   $('trackClear').onclick = () => { if (confirm('Track record in deze browser wissen?')) { S.track = []; trSave(); renderTrack(); $('trackSum').textContent = 'Gewist.'; } };
+  // tijdsframe-tabs
+  for (const b of $('tfTabs').children) b.onclick = () => setTF(b.dataset.tf);
+  window.addEventListener('hashchange', () => { const k = location.hash.slice(1); if (TIMEFRAMES[k]) setTF(k); });
+  // instellingen koopadvies (in procenten/punten ingevuld, intern als fractie)
+  const fields = [['setMinP', 'minP', 50, 99], ['setEdge', 'edge', 0, 30], ['setFee', 'fee', 0, 20]];
+  for (const [id, key] of fields) $(id).value = +(S.cfg[key] * 100).toFixed(1);
+  $('thSel').value = String(S.cfg.th);
+  const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(S.cfg)); } catch {} };
+  for (const [id, key, lo, hi] of fields) {
+    $(id).addEventListener('change', e => {
+      const v = parseFloat(String(e.target.value).replace(',', '.'));
+      if (isFinite(v)) S.cfg[key] = clamp(v, lo, hi) / 100;
+      e.target.value = +(S.cfg[key] * 100).toFixed(1);
+      saveCfg(); renderEntry();
+    });
+  }
+  $('thSel').addEventListener('change', e => { S.cfg.th = +e.target.value; saveCfg(); renderEntry(); });
+}
+
+function loadCfg() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CFG_KEY));
+    if (c) for (const k of ['minP', 'edge', 'fee', 'th']) if (isFinite(c[k])) S.cfg[k] = +c[k];
+  } catch {}
 }
 
 async function init() {
-  S.track = trLoad();
+  loadCfg();
+  let tf = location.hash.slice(1);
+  if (!TIMEFRAMES[tf]) { try { tf = localStorage.getItem(TF_KEY); } catch {} }
+  setTF(tf || '15m', true);
   wireUi();
   setConn('warn', 'Data laden…');
   if (await refreshKlines(400)) setConn('warn', 'Verbinden met live stream…');
@@ -1842,7 +2187,7 @@ async function init() {
   setInterval(slowTick, 2000);
   setInterval(watchdog, 5000);
   setInterval(pollPolymarketBook, 4000);
-  loadHistory();
+  ensureHistory();
 }
 
 init();
