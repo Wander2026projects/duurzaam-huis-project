@@ -659,8 +659,10 @@ async function watchdog() {
 // Zorgt dat er genoeg historie is voor het gekozen tijdsframe; haalt zo nodig oudere data bij.
 // Alle laadklussen lopen na elkaar via één promise-keten, zodat er nooit twee tegelijk lopen.
 function ensureHistory() {
+  const id = S.hist.jobId = (S.hist.jobId || 0) + 1;
   S.hist.job = S.hist.job.then(loadHistory).then(() => {
-    if (S.hist.error) return;
+    if (S.hist.error) { renderEntry(); return; }
+    if (id !== S.hist.jobId) return;          // er staat al een nieuwere laadklus klaar die zelf traint
     rebuildSamples();
     renderCalib();
     retrain();
@@ -674,6 +676,7 @@ async function loadHistory() {
     return h.length ? Date.now() - h[0].t : 0;
   };
   const needMs = () => TF.histDays * 24 * 60 * MIN;
+  S.hist.error = null;
   if (covered() >= needMs() - 2 * 60 * MIN) return;
   const first = !S.hist.candles.length;
   if (first) S.hist.loading = true; else S.hist.busy = true;
@@ -691,14 +694,21 @@ async function loadHistory() {
       $('entryTbl').innerHTML = `<tr><td colspan="5" class="muted">Historie laden… ${pct}%</td></tr>`;
     }
     const now = Date.now();
-    if (first) S.hist.candles = older.filter(c => c.t + MIN <= now);
+    if (first) {
+      // kaarsen die tijdens het laden sloten (en de toen nog lopende laatste kaars) samenvoegen
+      const m = new Map(older.filter(c => c.t + MIN <= now).map(c => [c.t, c]));
+      for (const c of S.hist.pending || []) m.set(c.t, c);
+      for (const c of S.klines) if (c.t + MIN <= now && m.size && c.t >= older[0].t) m.set(c.t, c);
+      S.hist.candles = [...m.values()].sort((a, b) => a.t - b.t);
+      S.hist.pending = [];
+    }
     else {
       const firstT = S.hist.candles[0].t;
       S.hist.candles = older.filter(c => c.t < firstT).concat(S.hist.candles);
     }
   } catch (e) {
     S.hist.error = e.message;
-    $('calibSum').textContent = 'Historie kon niet geladen worden (' + e.message + ').';
+    $('calibSum').textContent = 'Historie kon niet geladen worden (' + e.message + '). Wordt bij het volgende venster opnieuw geprobeerd.';
   } finally {
     S.hist.loading = false;
     S.hist.busy = false;
@@ -715,8 +725,9 @@ function histCandles() {
 
 function appendHist(c) {
   const h = S.hist.candles;
-  if (S.hist.loading) return;
-  if (!h.length || c.t > h[h.length - 1].t) h.push(c);
+  if (S.hist.loading) { (S.hist.pending || (S.hist.pending = [])).push(c); return; }
+  if (h.length && h[h.length - 1].t === c.t) h[h.length - 1] = c;
+  else if (!h.length || c.t > h[h.length - 1].t) h.push(c);
 }
 
 // Voor elk venster en elke minuut: z-score op dat moment + of het venster UP eindigde.
@@ -935,7 +946,13 @@ function knnQuery(lib, v, k = KNN_K) {
     for (let m = 0; m < v.length; m++) { const e = w[m] - v[m]; s += e * e; }
     d[i] = s;
   }
-  const order = Array.from(d.keys()).sort((a, b) => d[a] - d[b]);
+  // alleen de dichtstbijzijnde ~400 sorteren i.p.v. de hele bibliotheek
+  const M = Math.min(lib.length, 400);
+  let thr = Infinity;
+  if (lib.length > M) { const sample = Array.from(d).sort((a, b) => a - b); thr = sample[M - 1]; }
+  let order = [];
+  for (let i = 0; i < d.length; i++) if (d[i] <= thr) order.push(i);
+  order.sort((a, b) => d[a] - d[b]);
   const picked = [];
   for (const i of order) {
     // geen buren uit dezelfde episode (binnen één venster van elkaar)
@@ -1241,13 +1258,18 @@ function pmSlugs(ws) {
   return [`${base}-${m}-${d}-${y}-${h}${ap}-et`, `${base}-${m}-${d}-${h}${ap}-et`, `${base}-${m}-${d}-${h}-${ap}-et`, `${base}-${m}-${d}-${y}-${h}-${ap}-et`];
 }
 
+const wsOf = slugs => slugs.ws;
 async function findPmEvent(slugs) {
   let lastErr = new Error('markt niet gevonden');
   for (const slug of slugs) {
     try {
       const arr = await fetchJson(`${PM_GAMMA}/events?slug=${slug}`);
       const ev = Array.isArray(arr) ? arr[0] : arr;
-      if (ev && ev.markets && ev.markets.length) return { ev, slug };
+      if (ev && ev.markets && ev.markets.length) {
+        const end = Date.parse(ev.endDate || ev.markets[0].endDate || '');
+        if (TF.key === '1h' && isFinite(end) && Math.abs(end - (wsOf(slugs) + WIN)) > 10 * MIN) continue;   // verkeerd uur
+        return { ev, slug };
+      }
     } catch (e) { lastErr = e; }
   }
   throw lastErr;
@@ -1255,6 +1277,7 @@ async function findPmEvent(slugs) {
 
 async function loadPolymarket(ws) {
   const slugs = pmSlugs(ws), gen = S.gen;
+  slugs.ws = ws;
   const pm = S.pm = { ws, gen, slug: slugs[0], url: `https://polymarket.com/event/${slugs[0]}`, status: 'laden', tokens: null, up: null, down: null, priceToBeat: null };
   try {
     const { ev, slug } = await findPmEvent(slugs);
@@ -1270,15 +1293,19 @@ async function loadPolymarket(ws) {
     pm.tokens = { up: tokens[iUp], down: tokens[iDown] };
     pm.up = { mid: +prices[iUp] || null };
     pm.down = { mid: +prices[iDown] || null };
-    const ptb = [ev.eventMetadata, m.eventMetadata, ev, m]
-      .map(o => o && +(o.priceToBeat ?? o.referencePrice))
-      .find(v => isFinite(v) && v > 0);
+    const ptb = readPriceToBeat(ev, m);
     if (ptb) pm.priceToBeat = ptb;
     pm.status = 'ok';
     await pollPolymarketBook();
   } catch (e) {
-    if (S.pm === pm) { pm.status = 'fout'; pm.err = e.message; }
+    if (S.pm === pm) { pm.status = 'fout'; pm.err = e.message; pm.failedAt = Date.now(); }
   }
+}
+
+function readPriceToBeat(ev, m) {
+  return [ev.eventMetadata, m && m.eventMetadata, ev, m]
+    .map(o => o && +(o.priceToBeat ?? o.referencePrice))
+    .find(v => isFinite(v) && v > 0) || null;
 }
 
 function bookTop(b, prev) {
@@ -1286,12 +1313,23 @@ function bookTop(b, prev) {
   const asks = (b.asks || []).map(x => +x.price).filter(isFinite);
   const bid = bids.length ? Math.max(...bids) : null;
   const ask = asks.length ? Math.min(...asks) : null;
-  const mid = bid != null && ask != null ? (bid + ask) / 2 : (prev && prev.mid) || null;
+  const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
   return { bid, ask, mid };
 }
 
 async function pollPolymarketBook() {
   const pm = S.pm;
+  if (pm && pm.status === 'fout' && pm.ws === S.curWs && pm.gen === S.gen && Date.now() - (pm.failedAt || 0) > 15000) {
+    loadPolymarket(pm.ws); return;
+  }
+  if (pm && pm.status === 'ok' && !pm.priceToBeat && TF.src === 'chainlink' && (pm.polls = (pm.polls || 0) + 1) % 3 === 0) {
+    fetchJson(`${PM_GAMMA}/events?slug=${pm.slug}`).then(arr => {
+      const ev = Array.isArray(arr) ? arr[0] : arr;
+      if (S.pm !== pm || !ev) return;
+      const v = readPriceToBeat(ev, ev.markets && ev.markets[0]);
+      if (v) pm.priceToBeat = v;
+    }).catch(() => {});
+  }
   if (!pm || !pm.tokens || !pm.tokens.up || !pm.tokens.down) return;
   try {
     const [bu, bd] = await Promise.all([pm.tokens.up, pm.tokens.down].map(id => fetchJson(`${PM_CLOB}/book?token_id=${id}`, 5000)));
@@ -1307,7 +1345,9 @@ function pmCost(side) {
   if (S.manualPm[side] != null) return S.manualPm[side];
   const pm = S.pm;
   if (!pm || pm.ws !== S.curWs || pm.gen !== S.gen || !pm[side]) return null;
-  return pm[side].ask ?? pm[side].mid ?? null;
+  // alleen een recente, echte vraagprijs: een oude of geschatte prijs kun je niet kopen
+  if (!pm.updated || Date.now() - pm.updated > 15000) return null;
+  return pm[side].ask ?? null;
 }
 
 // ---------- Analyse ----------
@@ -1470,9 +1510,9 @@ function renderHero(a, now) {
 }
 
 // Chainlink-markten (5/15 min): vlak bij de open kan het verschil Binance ↔ Chainlink de uitslag bepalen
+// Ook met een ingevulde/Polymarket price to beat: de live prijs hier is Binance, dus vlak bij de open blijft het onzeker.
 function nearOpenRisk(a, price) {
-  return TF.src === 'chainlink' && price && a.op && Math.abs(price - a.op.px) < NEAR_OPEN_USD &&
-    a.op.src !== 'handmatig ingevuld' && !a.op.src.startsWith('Polymarket');
+  return TF.src === 'chainlink' && !!price && !!a.op && Math.abs(price - a.op.px) < NEAR_OPEN_USD;
 }
 
 function renderVerdict(a, price) {
@@ -1497,7 +1537,7 @@ function renderVerdict(a, price) {
   for (const n of notes) { const div = document.createElement('div'); div.className = 'small muted'; div.textContent = n; el.appendChild(div); }
   if (nearOpenRisk(a, price)) {
     const w = document.createElement('div'); w.className = 'warnline small';
-    w.textContent = `Prijs ligt minder dan $${NEAR_OPEN_USD} van de open. Polymarket rekent met Chainlink, niet Binance — vul de echte price to beat in voor zekerheid.`;
+    w.textContent = `Prijs ligt minder dan $${NEAR_OPEN_USD} van de open. Polymarket rekent met Chainlink, niet Binance — die kunnen tientallen dollars verschillen. Controleer de live prijs op Polymarket.`;
     el.appendChild(w);
   }
 }
@@ -1658,7 +1698,7 @@ function retrain() {
   $('modelSum').textContent = 'Model trainen…';
   $('knnSub').textContent = 'patronen zoeken in de historie…';
   setTimeout(() => {
-    if (gen !== S.gen) return;
+    if (gen !== S.gen || S.hist.loading || S.hist.busy) return;
     try { trainModels(); } catch (e) { S.model = { error: e.message }; }
     renderModel();
     renderEntry();
@@ -1974,11 +2014,13 @@ function renderEntry() {
   // Hoogste slagingskans (met genoeg voorbeelden) en het vroegste moment dat jouw minimum haalt (meer rendement)
   const solid = rows.filter(r => r.n >= 30 && r.freq >= 0.1);
   const bestRate = solid.slice().sort((x, y) => y.lo - x.lo)[0];
-  const bestRet = solid.filter(r => r.lo >= S.cfg.minP && priceMath(r.rate).maxPrice > 0).sort((x, y) => x.k - y.k)[0];
+  // hoogste rendement = laagste slagingskans die je minimum nog betrouwbaar haalt
+  const bestRet = solid.filter(r => r.lo >= S.cfg.minP && priceMath(r.rate).maxPrice > 0).sort((x, y) => x.rate - y.rate)[0];
   const m = S.model, pv = m && m.preVal;
   const preRow = pv && pv.selN ? (() => {
     const pm = priceMath(pv.selAcc);
-    return `<tr><td>vooraf (vóór de start)</td><td class="mono">${fmtPct(pv.selN / pv.n, 0)}</td><td class="mono ${pv.selAcc >= S.cfg.minP ? 'ok' : 'bad'}">${fmtPct(pv.selAcc, 0)}</td><td class="mono">${pm.maxPrice > 0 ? cents(pm.maxPrice) : '–'}</td><td class="mono">${pm.winReturn != null ? '+' + fmtPct(pm.winReturn, 0) : '–'}</td></tr>`;
+    const okPre = pv.selN >= 30 && wilson(Math.round(pv.selAcc * pv.selN), pv.selN)[0] >= S.cfg.minP;
+    return `<tr><td>vooraf <span class="muted">(model ≥55% zeker)</span></td><td class="mono">${fmtPct(pv.selN / pv.n, 0)}</td><td class="mono ${okPre ? 'ok' : pv.selAcc < S.cfg.minP ? 'bad' : ''}">${fmtPct(pv.selAcc, 0)} <span class="muted">(n=${pv.selN})</span></td><td class="mono">${pm.maxPrice > 0 ? cents(pm.maxPrice) : '–'}</td><td class="mono">${pm.winReturn != null ? '+' + fmtPct(pm.winReturn, 0) : '–'}</td></tr>`;
   })() : '';
   tb.innerHTML = preRow + (rows.map(r => {
     const pm = priceMath(r.rate);
@@ -1988,10 +2030,13 @@ function renderEntry() {
       `<td class="mono">${pm.maxPrice > 0 ? cents(pm.maxPrice) : '–'}</td><td class="mono">${pm.winReturn != null ? '+' + fmtPct(pm.winReturn, 0) : '–'}</td></tr>`;
   }).join('') || `<tr><td colspan="5" class="muted">Te weinig momenten waarop het model ≥ ${fmtPct(S.cfg.th, 0)} zeker was.</td></tr>`);
   const parts = [];
-  if (bestRate) parts.push(`Hoogste slagingskans: na ${bestRate.k} min (${fmtPct(bestRate.rate, 0)} goed, komt in ${fmtPct(bestRate.freq, 0)} van de vensters voor).`);
+  if (bestRate) parts.push(`Betrouwbaarste moment: na ${bestRate.k} min (${fmtPct(bestRate.rate, 0)} goed, komt in ${fmtPct(bestRate.freq, 0)} van de vensters voor).`);
   if (bestRet) parts.push(`Beste rendement dat nog jouw minimum van ${fmtPct(S.cfg.minP, 0)} haalt: na ${bestRet.k} min — koop alleen als de prijs ≤ ${cents(priceMath(bestRet.rate).maxPrice)} is (groen gemarkeerd).`);
   else parts.push(`Geen moment haalt betrouwbaar jouw minimum van ${fmtPct(S.cfg.minP, 0)} bij deze zekerheid — kies een hogere zekerheid of verlaag je minimum.`);
-  if (pv && pv.selN) parts.push(`Vooraf (vóór de start) zat het model bij duidelijke voorspellingen ${fmtPct(pv.selAcc, 0)} goed — ${pv.selAcc >= S.cfg.minP ? 'dat haalt je minimum' : 'meestal te onzeker om vooraf te kopen'}.`);
+  if (pv && pv.selN) {
+    const okPre = pv.selN >= 30 && wilson(Math.round(pv.selAcc * pv.selN), pv.selN)[0] >= S.cfg.minP;
+    parts.push(`Vooraf (vóór de start) zat het model bij duidelijke voorspellingen (≥55% zeker) ${fmtPct(pv.selAcc, 0)} goed in de test — ${okPre ? 'dat haalt betrouwbaar je minimum' : 'niet betrouwbaar genoeg om vooraf te kopen'}.`);
+  }
   $('entrySum').textContent = parts.join(' ');
 }
 
@@ -2012,7 +2057,7 @@ function computeAdvice(a, now) {
     { ok: an != null && an >= Math.min(S.cfg.minP, pModel) - 0.1, text: an != null ? `Historie bevestigt: vergelijkbare momenten ${fmtPct(an, 0)} ${side}` : 'Historie: nog te weinig vergelijkbare momenten' },
     { ok: score > -0.15, text: `Order flow en chart-signalen niet tegen ${side} (score ${fmtSigned(score, 2)})` },
     { ok: !sweepAgainst, text: sweepAgainst ? `Er was een sweep tegen ${side} in (zie Highs & lows)` : 'Geen sweep tegen je richting in' },
-    { ok: !nearOpenRisk(a, a.sg.price), text: nearOpenRisk(a, a.sg.price) ? 'Prijs te dicht bij de open (Chainlink-risico) — vul de price to beat in' : 'Prijs ver genoeg van de open' },
+    { ok: !nearOpenRisk(a, a.sg.price), text: nearOpenRisk(a, a.sg.price) ? `Prijs minder dan $${NEAR_OPEN_USD} van de open (Chainlink kan anders uitkomen)` : TF.src === 'binance' ? 'Afrekening op Binance: geen bronverschil' : 'Prijs ver genoeg van de open' },
     { ok: secsLeft >= 15, text: secsLeft >= 15 ? 'Genoeg tijd om de order te plaatsen' : 'Minder dan 15 s over — order komt mogelijk niet meer door' },
     { ok: cost != null && maxPrice > 0 && cost <= maxPrice, price: true,
       text: cost == null ? 'Polymarket-prijs onbekend — vul hem in bij "Polymarket vergelijking"' : `Prijs ${side} ${cents(cost)} ≤ max ${maxPrice > 0 ? cents(maxPrice) : '–'}` },
@@ -2023,8 +2068,8 @@ function computeAdvice(a, now) {
   if (cost != null) {
     const eff = cost + S.cfg.fee;
     res.ev = pHat / eff - 1;
-    res.winReturn = (1 - eff) / eff;
-    res.kelly = clamp((pHat - eff) / (1 - eff) / 4, 0, 0.05);   // kwart-Kelly, max 5% van je potje
+    res.winReturn = eff < 1 ? (1 - eff) / eff : null;
+    res.kelly = eff < 1 && pHat > eff ? clamp((pHat - eff) / (1 - eff) / 4, 0, 0.05) : 0;   // kwart-Kelly, max 5%
   }
   if (all) return { ...res, state: up ? 'buy-up' : 'buy-down', head: `KOOP ${side}`, text: `Tot max ${cents(maxPrice)} per share.` };
   if (allButPrice && maxPrice > 0) return { ...res, state: 'almost', head: `${side} interessant — wacht op prijs`, text: `Koop alleen als ${side} ≤ ${cents(maxPrice)} kost${cost != null ? ` (nu ${cents(cost)})` : ''}.` };
@@ -2044,7 +2089,9 @@ function renderAdvice(a, now) {
   if (adv.pHat == null) { nums.textContent = '–'; return; }
   const lines = [`Conservatieve slagingskans ${adv.side}: ${fmtPct(adv.pHat, 0)} · max prijs ${adv.maxPrice > 0 ? cents(adv.maxPrice) : '– (te onzeker)'}.`];
   if (adv.ev != null) {
-    lines.push(`Bij ${cents(adv.cost)} + ${Math.round(S.cfg.fee * 100)}pt fee: winst als het goed gaat +${fmtPct(adv.winReturn, 0)}, verwachte waarde ${adv.ev >= 0 ? '+' : '−'}${fmtPct(Math.abs(adv.ev), 1)} per inzet.`);
+    lines.push(`Bij ${cents(adv.cost)} + ${Math.round(S.cfg.fee * 100)}pt fee: ` +
+      (adv.winReturn != null ? `winst als het goed gaat +${fmtPct(adv.winReturn, 0)}` : 'geen winst mogelijk, zelfs als het goed gaat') +
+      `, verwachte waarde ${adv.ev >= 0 ? '+' : '−'}${fmtPct(Math.abs(adv.ev), 1)} per inzet.`);
     lines.push(adv.kelly > 0 ? `Voorzichtige inzet: max ${fmtPct(adv.kelly, 1)} van je potje (kwart-Kelly).` : 'Inzet: niets — bij deze prijs is er geen voordeel.');
   }
   nums.textContent = lines.join(' ');
@@ -2059,7 +2106,7 @@ function applyTfLabels() {
   $('trackHead').innerHTML = '<th>Venster</th>' + TF.checkpoints.map(cp => `<th>${cp ? `na ${cp}m` : 'vooraf'}</th>`).join('') + '<th>Uitslag</th>';
   $('knnLabel').textContent = `Meest gelijkende chartvormen uit de laatste ${TF.histDays} dagen (prijs + order flow, laatste ${durText(TF.knnL)}) en wat er ${TF.label} later gebeurde`;
   const starts = { '5m': 'elke 5 minuten (:00, :05, :10, …)', '15m': 'elk kwartier (:00, :15, :30, :45)', '1h': 'elk heel uur' }[TF.key];
-  $('exMarket').innerHTML = `<strong>De markt:</strong> bij Polymarket "Bitcoin Up or Down – ${TF.label}" wint UP als de prijs aan het eind van het venster <em>gelijk aan of hoger</em> is dan aan het begin ("price to beat"). Vensters starten ${starts}. Polymarket rekent met New York-tijd; 18:00 hier = 12:00 ET.`;
+  $('exMarket').innerHTML = `<strong>De markt:</strong> bij Polymarket "Bitcoin Up or Down – ${TF.label}" wint UP als de prijs aan het eind van het venster <em>gelijk aan of hoger</em> is dan aan het begin ("price to beat"). Vensters starten ${starts}. Polymarket rekent met New York-tijd; dit venster begint om ${fmtTime(winStart(Date.now()))} hier = ${fmtEt(winStart(Date.now()))} ET.`;
   $('exSource').innerHTML = TF.src === 'binance'
     ? '<strong>Prijsbron:</strong> de uurmarkten rekenen af op de <em>Binance BTC/USDT 1-uurs candle</em> — precies de data die deze pagina gebruikt, dus de price to beat klopt hier exact.'
     : '<strong>Prijsbron:</strong> de 5- en 15-minutenmarkten rekenen af met de Chainlink BTC/USD-feed, deze pagina gebruikt Binance BTC/USDT. Die verschillen meestal een paar tot tientallen dollars. Staat de prijs vlak bij de open, dan kan dat verschil de uitslag bepalen — vul dan de echte price to beat van Polymarket in.';
@@ -2099,6 +2146,7 @@ function onNewWindow(ws) {
   S.curWs = ws;
   S.manualPm = { up: null, down: null };
   $('pmUpIn').value = ''; $('pmDownIn').value = '';
+  if (S.hist.error) ensureHistory();          // mislukte historie opnieuw proberen
   if (!first) {
     $('openInput').value = '';
     rebuildSamples(); renderCalib(); renderEntry();
