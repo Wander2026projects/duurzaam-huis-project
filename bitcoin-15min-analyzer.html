@@ -47,6 +47,10 @@ main { display: grid; gap: 12px; padding: 12px 16px 32px; max-width: 1280px; mar
 .up-c { color: var(--up); } .down-c { color: var(--down); } .warn-c { color: var(--warn); }
 .hero-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .hero-top .right { text-align: right; min-width: 140px; }
+.simbox { flex: 1 1 220px; max-width: 420px; padding: 8px 12px; border-radius: 10px; border: 1px dashed var(--border); background: var(--panel-2); }
+.simbox.up { border: 1px solid var(--up); background: var(--up-soft); }
+.simbox.down { border: 1px solid var(--down); background: var(--down-soft); }
+.simbox .big { font-size: 18px; }
 .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
 .progress > div { height: 100%; width: 0; background: var(--accent); }
 .prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
@@ -133,6 +137,12 @@ td.wrap { white-space: normal; text-align: left; }
         <div class="label">Huidig venster (jouw tijd)</div>
         <div id="winLabel" class="big mono">--:-- – --:--</div>
         <div id="winEt" class="small muted"></div>
+      </div>
+      <div id="simBox" class="simbox" aria-live="polite">
+        <div class="label">Aankoop simulatie (dit venster)</div>
+        <div id="simHead" class="big mono">Nog niet gekocht</div>
+        <div id="simSub" class="small muted">Koopt zodra het koopadvies KOOP zegt.</div>
+        <div id="simPrev" class="small muted"></div>
       </div>
       <div class="right">
         <div class="label">Resterend</div>
@@ -413,6 +423,7 @@ const S = {
   src: { cb: { ticks: [], last: 0, fails: 0 }, cl: { ticks: [], last: 0, fails: 0 }, tw: { ticks: [], last: 0 } },
   rec: { pending: new Map(), last: 0, error: null, bt: null },   // pending: 'tf|ws' -> { open, feed }
   notified: null,
+  sim: null,             // gesimuleerde aankopen: 'tf|ws' -> { t, side, price, pHat, open, feed, res }
   ws: null, wsIdx: 0, wsFails: 0, lastMsg: 0, reconnectTimer: null,
   last: null,
 };
@@ -2385,9 +2396,60 @@ function notifyBuy(a, adv) {
   } catch {}
 }
 
+// Eerste KOOP-signaal per venster vastleggen (blijft staan, ook na herladen)
+const SIM_KEY = 'btc.simbuys.v1';
+function simLoad() { try { return JSON.parse(localStorage.getItem(SIM_KEY)) || {}; } catch { return {}; } }
+function simSave() {
+  try {
+    const keys = Object.keys(S.sim).sort((x, y) => S.sim[x].t - S.sim[y].t);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete S.sim[k];
+    localStorage.setItem(SIM_KEY, JSON.stringify(S.sim));
+  } catch {}
+}
+function simCapture(a, adv, now) {
+  if (!adv.state.startsWith('buy')) return;
+  if (!S.sim) S.sim = simLoad();
+  const key = `${TF.key}|${a.ws}`;
+  if (S.sim[key]) return;
+  S.sim[key] = { t: now, side: adv.side, price: adv.cost, pHat: adv.pHat, open: a.op.px, feed: a.op.feed, ws: a.ws };
+  simSave();
+}
+
+function renderSimBox(a, now) {
+  if (!S.sim) S.sim = simLoad();
+  const cur = S.sim[`${TF.key}|${a.ws}`];
+  const box = $('simBox');
+  box.className = 'simbox' + (cur ? (cur.side === 'UP' ? ' up' : ' down') : '');
+  if (cur) {
+    const tStr = new Date(cur.t).toLocaleTimeString('nl-NL');
+    $('simHead').textContent = `${cur.side} gekocht om ${tStr}`;
+    $('simHead').className = 'big mono ' + (cur.side === 'UP' ? 'up-c' : 'down-c');
+    $('simSub').textContent = `Prijs ${cents(cur.price)} · kans ${fmtPct(cur.pHat, 0)} · ${Math.round((cur.t - a.ws) / 1000 / 60 * 10) / 10} min na de start`;
+  } else {
+    $('simHead').textContent = 'Nog niet gekocht';
+    $('simHead').className = 'big mono';
+    $('simSub').textContent = 'Koopt zodra het koopadvies KOOP zegt.';
+  }
+  // uitslag van de aankoop in het vorige venster
+  const prevWs = a.ws - WIN, prev = S.sim[`${TF.key}|${prevWs}`];
+  let txt = '';
+  if (prev) {
+    if (!prev.res) {
+      const out = windowOutcome(prevWs, prev.open, prev.feed, TF, now);
+      if (out) { prev.res = out.res; simSave(); }
+    }
+    const won = prev.res && prev.res === prev.side;
+    txt = `Vorig venster: ${prev.side} gekocht om ${new Date(prev.t).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })} voor ${cents(prev.price)} → ` +
+      (!prev.res ? 'uitslag nog niet bekend' : won ? `gewonnen (+${fmtPct(1 / (prev.price + S.cfg.fee) - 1, 0)})` : 'verloren');
+  } else txt = 'Vorig venster: geen aankoop.';
+  $('simPrev').textContent = txt;
+}
+
 function renderAdvice(a, now) {
   const adv = computeAdvice(a, now);
   notifyBuy(a, adv);
+  simCapture(a, adv, now);
+  renderSimBox(a, now);
   const box = $('signal');
   box.className = 'signal' + (adv.state === 'wait' ? '' : ' ' + adv.state);
   $('sigHead').textContent = adv.head;
