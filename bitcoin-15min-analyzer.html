@@ -676,6 +676,11 @@ function pruneTrades(now) {
 }
 
 async function watchdog() {
+  // Coinbase/RTDS: open maar al 30 s stil? Opnieuw verbinden.
+  for (const [k, last] of [['cb', S.src.cb.last], ['cl', Math.max(S.src.cl.last, S.src.tw.last)]]) {
+    const st = S.src[k];
+    if (st.ws && st.ws.readyState === 1 && Date.now() - Math.max(last || 0, st.opened || 0) > 30000) { try { st.ws.close(); } catch {} }
+  }
   const silent = Date.now() - S.lastMsg;
   if (S.ws && S.ws.readyState === WebSocket.OPEN && silent > 15000) { try { S.ws.close(); } catch {} }
   if (silent > 10000) {                       // geen live data: val terug op REST
@@ -697,6 +702,7 @@ function ensureHistory() {
     rebuildSamples();
     renderCalib();
     retrain();
+    runBacktest();                 // vangnet-uitslagen hebben de historie nodig
   });
   return S.hist.job;
 }
@@ -1417,11 +1423,12 @@ function pushTick(buf, t, v) {
   if (!(v > 0) || !(t > 0)) return;
   const last = buf[buf.length - 1];
   if (last && t < last.t) return;                      // oude/dubbele berichten negeren
-  if (last && t === last.t) last.v = v; else buf.push({ t, v });
-  if (buf.length > 4000 || buf[0].t < t - TICK_KEEP_MS) {
+  if (last && t - last.t < 500) last.v = v;           // max 2 ticks per seconde bewaren
+  else buf.push({ t, v });
+  if (buf[0].t < t - TICK_KEEP_MS || buf.length > 50000) {
     let i = 0;
     while (i < buf.length && buf[i].t < t - TICK_KEEP_MS) i++;
-    buf.splice(0, Math.max(i, buf.length - 4000));
+    buf.splice(0, Math.max(i, buf.length - 50000));
   }
 }
 
@@ -1430,13 +1437,14 @@ function avgTicks(buf, from, to, key = 'v') {
   if (!buf.length || to <= from) return null;
   let i = buf.length - 1;
   while (i > 0 && buf[i].t > from) i--;
-  if (buf[i].t > from + 5000) return null;               // geen data rond het begin
-  if (buf[buf.length - 1].t < to - 15000) return null;    // geen recente data rond het einde
-  let sum = 0, cur = buf[i][key], t = from;
+  if (buf[i].t > from + 5000 || buf[i].t < from - 15000) return null;   // geen (verse) data rond het begin
+  let sum = 0, cur = buf[i][key], t = from, prevT = buf[i].t;
   for (let j = i + 1; j < buf.length && buf[j].t <= to; j++) {
+    if (buf[j].t - prevT > 15000) return null;            // gat in de data: dan liever geen gemiddelde
     if (buf[j].t > t) { sum += cur * (buf[j].t - t); t = buf[j].t; }
-    cur = buf[j][key];
+    cur = buf[j][key]; prevT = buf[j].t;
   }
+  if (to - prevT > 15000) return null;                    // geen data rond het einde
   sum += cur * (to - t);
   return sum / (to - from);
 }
@@ -1468,7 +1476,7 @@ function connectCoinbase() {
   let ws;
   try { ws = new WebSocket(CB_WS); } catch { retrySrc('cb', connectCoinbase); return; }
   st.ws = ws;
-  ws.onopen = () => { st.fails = 0; ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); };
+  ws.onopen = () => { st.fails = 0; st.opened = Date.now(); ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); };
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type !== 'ticker' || m.product_id !== 'BTC-USD') return;
@@ -1488,7 +1496,7 @@ function connectRtds() {
   try { ws = new WebSocket(RTDS_WS); } catch { retrySrc('cl', connectRtds); return; }
   st.ws = ws;
   ws.onopen = () => {
-    st.fails = 0;
+    st.fails = 0; st.opened = Date.now();
     const sub = (topic, symbol) => ws.send(JSON.stringify({ action: 'subscribe', subscriptions: [{ topic, type: '*', filters: JSON.stringify({ symbol }) }] }));
     sub('crypto_prices_chainlink', 'btc/usd');
     sub('crypto_prices_twap_sixty', 'btc/usd');
@@ -1539,7 +1547,11 @@ function currentOpen(ws) {
   if (cl && sane(cl)) return { px: cl, src: 'Chainlink, zelf berekend 60s-gemiddelde', feed: 'cl' };
   const cb = avgTicks(S.src.cb.ticks, ws - TWAP_MS, ws);
   if (cb && sane(cb)) return { px: cb, src: 'schatting: Coinbase 60s-gemiddelde', feed: 'cb' };
-  if (binOpen) return { px: binOpen, src: 'schatting: Binance-open', feed: 'bn' };
+  // Binance als laatste redmiddel: ook hier het 60s-gemiddelde vóór de start (zoals Polymarket)
+  const bnAvg = avgTicks(S.trades, ws - TWAP_MS, ws, 'p');
+  const kPrev = S.klines.find(c => c.t === ws - MIN);
+  const bnEst = bnAvg || (kPrev ? (kPrev.o + kPrev.h + kPrev.l + kPrev.c) / 4 : binOpen);
+  if (bnEst) return { px: bnEst, src: 'schatting: Binance-gemiddelde minuut vóór de start', feed: 'bn' };
   return null;
 }
 
@@ -1555,33 +1567,51 @@ function settleState(op, now, we) {
   if (op.feed !== 'bn' && op.feed !== 'cb' && srcFresh('cl')) { buf = S.src.cl.ticks; spotSrc = 'Chainlink'; }
   else if (op.feed !== 'bn' && srcFresh('cb')) { buf = S.src.cb.ticks; spotSrc = 'Coinbase'; }
   else { buf = binanceTicks(); key = 'p'; spotSrc = 'Binance'; }
-  const spot = buf.length ? buf[buf.length - 1][key] : S.price;
+  const lt = buf[buf.length - 1];
+  const fresh = lt && Date.now() - (key === 'p' ? lt.t : S.src[spotSrc === 'Chainlink' ? 'cl' : 'cb'].last) < 5000;
+  const spot = fresh ? lt[key] : S.price;
   let E = spot, V;
   if (T >= 1) V = T - 2 / 3;
   else {
-    const known = avgTicks(buf, we - TWAP_MS, now, key);      // deel van de eindminuut dat al voorbij is
+    const known = fresh ? avgTicks(buf, we - TWAP_MS, now, key) : null;   // deel van de eindminuut dat al voorbij is
     const s = 1 - T;
-    if (known) E = s * known + (1 - s) * spot;
-    V = Math.max(T ** 3 / 3, 1 / 3600);
+    if (known) { E = s * known + T * spot; V = Math.max(T ** 3 / 3, 1 / 3600); }
+    else V = 1 / 3;                                   // onbekend: rekenen alsof de hele eindminuut nog open ligt
   }
+  // open is alleen geschat (Binance): extra onzekerheid voor het verschil met de echte price to beat
+  if (op.feed === 'bn') V += 1 / 3;
   return { spot, E, V, spotSrc };
 }
 
 // Uitslag van een afgelopen venster: bij Chainlink-markten liefst met Chainlink-data, anders Binance-candles
-function windowOutcome(ws, open, openFeed) {
-  const we = ws + WIN;
-  if (TF.src === 'chainlink' && open && openFeed && openFeed !== 'bn' && openFeed !== 'cb') {
+function windowOutcome(ws, open, openFeed, tf = TF, now = Date.now()) {
+  const win = tf.min * MIN, we = ws + win;
+  const reached = buf => buf.length && buf[buf.length - 1].t >= we;
+  if (tf.src === 'chainlink' && open && openFeed && openFeed !== 'bn' && openFeed !== 'cb') {
     const tw = valueAt(S.src.tw.ticks, we, 5000);
-    const end = tw ? tw.v : avgTicks(S.src.cl.ticks, we - TWAP_MS, we);
+    const end = tw ? tw.v : reached(S.src.cl.ticks) ? avgTicks(S.src.cl.ticks, we - TWAP_MS, we) : null;
     if (end && sane(end)) return { res: end >= open ? 'UP' : 'DOWN', close: end, src: tw ? 'chainlink-twap' : 'chainlink' };
   }
-  if (TF.src === 'chainlink' && open && openFeed === 'cb') {
+  if (tf.src === 'chainlink' && open && openFeed === 'cb' && reached(S.src.cb.ticks)) {
     const end = avgTicks(S.src.cb.ticks, we - TWAP_MS, we);
     if (end) return { res: end >= open ? 'UP' : 'DOWN', close: end, src: 'coinbase' };
   }
-  const o = findCandle(ws), c = findCandle(ws + (WM - 1) * MIN);
-  if (o && c) return { res: c.c >= o.o ? 'UP' : 'DOWN', close: c.c, src: 'binance' };
-  return null;
+  if (tf.src === 'chainlink' && openFeed && openFeed !== 'bn' && now < we + 2 * MIN) return null;   // even wachten op de feed
+  return binanceOutcome(ws, tf);
+}
+
+// Uitslag uit Binance-candles. Chainlink-markten: benader de 60s-gemiddelden met de gemiddelde prijs
+// van de minuut vóór de start en de laatste minuut.
+function binanceOutcome(ws, tf = TF) {
+  const wm = tf.min;
+  const typ = c => (c.o + c.h + c.l + c.c) / 4;
+  if (tf.src === 'chainlink') {
+    const s0 = findCandle(ws - MIN), e = findCandle(ws + (wm - 1) * MIN);
+    if (s0 && e) return { res: typ(e) >= typ(s0) ? 'UP' : 'DOWN', close: typ(e), src: 'binance (benadering)' };
+    return null;
+  }
+  const o = findCandle(ws), c = findCandle(ws + (wm - 1) * MIN);
+  return o && c ? { res: c.c >= o.o ? 'UP' : 'DOWN', close: c.c, src: 'binance' } : null;
 }
 
 function computeSignals(now) {
@@ -1694,7 +1724,7 @@ function resolveTrack(now) {
   let changed = false;
   for (const x of S.track) {
     if (x.res || now < x.ws + WIN + 3000) continue;
-    const out = windowOutcome(x.ws, x.open, x.feed);
+    const out = windowOutcome(x.ws, x.open, x.feed, TF, now);
     if (out) { x.close = out.close; x.res = out.res; x.src = out.src; changed = true; }
     else if (!S.hist.loading && !S.hist.busy && now - x.ws > (TF.histDays - 1) * 24 * 60 * MIN) { x.res = 'onbekend'; changed = true; }
   }
@@ -1769,7 +1799,9 @@ function renderVerdict(a, price) {
     const w = document.createElement('div'); w.className = 'warnline small';
     w.textContent = a.spotSrc === 'Chainlink'
       ? `Verwachte afrekenprijs ligt minder dan $${nearOpenUsd(a)} van de price to beat — dit kan nog alle kanten op.`
-      : `Prijs ligt minder dan $${nearOpenUsd(a)} van de open en de Chainlink-feed is niet beschikbaar (bron: ${a.spotSrc}). Polymarket rekent met Chainlink — controleer de live prijs op Polymarket.`;
+      : srcFresh('cl')
+        ? `Prijs ligt minder dan $${nearOpenUsd(a)} van de open, en de price to beat is een schatting (${a.op.src}). Vul de echte price to beat van Polymarket in.`
+        : `Prijs ligt minder dan $${nearOpenUsd(a)} van de open en de Chainlink-feed is niet beschikbaar (bron: ${a.spotSrc}). Polymarket rekent met Chainlink — controleer de live prijs op Polymarket.`;
     el.appendChild(w);
   }
 }
@@ -2193,7 +2225,7 @@ function drawChart(a) {
     ctx.beginPath(); ctx.moveTo(X(ws), y); ctx.lineTo(w - padR, y); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = col.accent; ctx.textBaseline = 'bottom';
     ctx.fillText('price to beat', X(ws) + 4, y - 3);
-    tag(y, open.toLocaleString('en-US', { maximumFractionDigits: 0 }), col.accent);
+    tag(y, a.op.px.toLocaleString('en-US', { maximumFractionDigits: 0 }), col.accent);
   }
   if (price) {
     const y = Math.round(Y(price)) + 0.5;
@@ -2339,6 +2371,7 @@ function notifyBuy(a, adv) {
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     const ac = S.audio || (S.audio = new AC());
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
     const o = ac.createOscillator(), g = ac.createGain();
     o.frequency.value = adv.side === 'UP' ? 880 : 440;
     g.gain.setValueAtTime(0.15, ac.currentTime);
@@ -2433,21 +2466,30 @@ function recordSnap() {
     sc: +a.sg.score.toFixed(3), sw: x.sw, no: x.no ? 1 : 0, op: a.op.px, of: a.op.feed, src: a.spotSrc,
   };
   idbReq('snaps', 'readwrite', st => st.add(snap));
-  S.rec.pending.set(`${TF.key}|${a.ws}`, { open: a.op.px, feed: a.op.feed });
+  S.rec.pending.set(`${TF.key}|${a.ws}`, { open: a.op.px, feed: a.op.feed, tf: TF });
   S.rec.last = Date.now();
 }
 
 // Uitslag van opgenomen vensters vastleggen zodra ze afgelopen zijn
 function resolveRecordings(now) {
-  for (const [key, { open, feed }] of [...S.rec.pending]) {
-    const [tf, wsS] = key.split('|'), ws = +wsS;
-    if (tf !== TF.key) { S.rec.pending.delete(key); continue; }
-    if (now < ws + WIN + 5000) continue;
-    const out = windowOutcome(ws, open, feed);
-    if (!out) { if (now > ws + WIN + 10 * MIN) S.rec.pending.delete(key); continue; }
+  for (const [key, { open, feed, tf: tfObj }] of [...S.rec.pending]) {
+    const [tf, wsS] = key.split('|'), ws = +wsS, win = tfObj.min * MIN;
+    if (now < ws + win + 5000) continue;
+    const out = windowOutcome(ws, open, feed, tfObj, now);
+    if (!out) { if (now > ws + win + 10 * MIN) S.rec.pending.delete(key); continue; }
     S.rec.pending.delete(key);
     idbReq('outcomes', 'readwrite', st => st.put({ tf, ws, res: out.res, close: out.close, src: out.src, open }))
-      .then(() => runBacktest());
+      .then(() => { if (tf === TF.key) runBacktest(); });
+  }
+}
+
+async function pruneRecordings() {
+  const cutoff = Date.now() - 30 * 24 * 60 * MIN;
+  for (const tf of Object.keys(TIMEFRAMES)) {
+    const range = IDBKeyRange.bound([tf, 0], [tf, cutoff]);
+    const keys = await idbReq('snaps', 'readonly', st => st.index('tfws').getAllKeys(range)) || [];
+    if (keys.length) await idbReq('snaps', 'readwrite', st => { for (const k of keys) st.delete(k); });
+    await idbReq('outcomes', 'readwrite', st => st.delete(range));
   }
 }
 
@@ -2492,8 +2534,8 @@ async function runBacktest() {
   // vensters zonder vastgelegde uitslag (pagina was dicht): Binance-candles als vangnet
   for (const ws of byWin.keys()) {
     if (outMap.has(ws) || Date.now() < ws + WIN + 5000) continue;
-    const o = findCandle(ws), c = findCandle(ws + (WM - 1) * MIN);
-    if (o && c) outMap.set(ws, { ws, res: c.c >= o.o ? 'UP' : 'DOWN', src: 'binance' });
+    const b = binanceOutcome(ws);
+    if (b) outMap.set(ws, { ws, ...b, src: b.src + ' (vangnet)' });
   }
   const main = simulate(byWin, outMap, S.cfg);
   // markt vs. model: wie schatte de kans op UP beter in? (Brier-score, lager is beter)
@@ -2513,7 +2555,8 @@ async function runBacktest() {
     grid.push({ minP, edge, n: r.n, roi: r.roi });
   }
   S.rec.bt = { windows: byWin.size, resolved: [...byWin.keys()].filter(ws => outMap.has(ws)).length, snaps: snaps.length, main, grid,
-    market: nb ? { n: nb, model: bp / nb, market: bm / nb } : null, srcs: outs.reduce((m, o) => (m[o.src] = (m[o.src] || 0) + 1, m), {}) };
+    market: nb ? { n: nb, model: bp / nb, market: bm / nb } : null,
+    srcs: [...byWin.keys()].map(ws => outMap.get(ws)).filter(Boolean).reduce((m, o) => (m[o.src] = (m[o.src] || 0) + 1, m), {}) };
   renderBacktest();
 }
 
@@ -2521,6 +2564,7 @@ function renderBacktest() {
   const bt = S.rec.bt;
   if (S.rec.error) { $('btSum').textContent = `Opslaan in deze browser lukt niet (${S.rec.error}). Probeer Chrome of Edge, niet in een privévenster.`; return; }
   if (!bt || !bt.snaps) {
+    $('btSum').textContent = `Nog geen opnames voor ${TF.label}. Zolang deze pagina openstaat, worden elke paar seconden de Polymarket-prijzen en de voorspellingen opgeslagen (alleen in deze browser).`;
     $('btStats').innerHTML = '<tr><td class="muted">Nog geen opnames voor dit tijdsframe. Laat de pagina open staan; elke paar seconden wordt de Polymarket-prijs vastgelegd.</td></tr>';
     $('btGrid').innerHTML = ''; $('btGridHead').innerHTML = ''; $('btMarket').textContent = '–'; drawBtChart(null);
     return;
@@ -2536,7 +2580,7 @@ function renderBacktest() {
       row('Grootste tussentijdse daling', `−$${m.dd.toFixed(2)}`) +
       row('Gem. instapmoment', `na ${Math.round(m.trades.reduce((s, t) => s + t.el, 0) / m.n / 60 * 10) / 10} min`) +
       row('Gem. betaalde prijs', cents(m.trades.reduce((s, t) => s + t.price, 0) / m.n))
-    : row('Trades', 'nog geen — het advies zei in de opgenomen vensters nooit KOOP');
+    : row('Trades', bt.resolved ? 'nog geen — het advies zei in de afgelopen vensters nooit KOOP' : 'nog geen afgelopen vensters — even geduld');
   drawBtChart(m.n ? m.trades : null);
   $('btGridHead').innerHTML = '<th>min. slagingskans →<br>min. voordeel ↓</th>' + [0.6, 0.7, 0.8, 0.9].map(p => `<th>${fmtPct(p, 0)}</th>`).join('');
   $('btGrid').innerHTML = [0.02, 0.04, 0.08].map(edge => `<tr><td>${Math.round(edge * 100)} pt</td>` + [0.6, 0.7, 0.8, 0.9].map(minP => {
@@ -2577,11 +2621,11 @@ function drawBtChart(trades) {
 }
 
 async function exportRecordings() {
-  const data = await loadRecordings(TF.key);
-  const blob = new Blob([JSON.stringify({ tf: TF.key, exported: new Date().toISOString(), ...data })], { type: 'application/json' });
+  const tf = TF.key, data = await loadRecordings(tf);
+  const blob = new Blob([JSON.stringify({ tf, exported: new Date().toISOString(), ...data })], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `btc-${TF.key}-opnames-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `btc-${tf}-opnames-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
@@ -2653,7 +2697,6 @@ function onNewWindow(ws) {
     if (ws % (60 * MIN) === 0) retrain();     // elk heel uur opnieuw leren
   }
   loadPolymarket(ws);
-  if (!first) runBacktest();
 }
 
 function tick() {
@@ -2715,6 +2758,14 @@ function wireUi() {
   }
   $('thSel').addEventListener('change', e => { S.cfg.th = +e.target.value; saveCfg(); renderEntry(); });
   $('setNotify').checked = !!S.cfg.notify;
+  // geluid mag pas na een klik/toets van de gebruiker starten
+  const unlock = () => {
+    if (!S.cfg.notify) return;
+    try { const AC = window.AudioContext || window.webkitAudioContext; S.audio = S.audio || new AC(); S.audio.resume(); } catch {}
+    try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+  };
+  window.addEventListener('pointerdown', unlock, { once: true });
+  window.addEventListener('keydown', unlock, { once: true });
   $('setNotify').addEventListener('change', e => {
     S.cfg.notify = e.target.checked; saveCfg();
     if (S.cfg.notify) {
@@ -2750,11 +2801,23 @@ async function init() {
   connectCoinbase();
   connectRtds();
   tick(); slowTick();
-  runBacktest();
-  setInterval(tick, 500);
-  setInterval(slowTick, 2000);
-  setInterval(watchdog, 5000);
-  setInterval(pollPolymarketBook, 4000);
+  pruneRecordings().then(runBacktest);
+  // Een worker als klok: browsers vertragen gewone timers sterk in een achtergrondtab,
+  // een worker niet — zo blijven opnames en meldingen doorlopen.
+  let beat = 0;
+  const onBeat = () => {
+    beat++;
+    tick();
+    if (beat % 4 === 0) slowTick();
+    if (beat % 10 === 0) watchdog();
+    if (beat % 8 === 0) pollPolymarketBook();
+  };
+  try {
+    const hb = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 500)'], { type: 'text/javascript' })));
+    hb.onmessage = onBeat;
+  } catch {
+    setInterval(onBeat, 500);
+  }
   ensureHistory();
 }
 
