@@ -142,6 +142,7 @@ td.wrap { white-space: normal; text-align: left; }
         <div class="label">Aankoop simulatie (dit venster)</div>
         <div id="simHead" class="big mono">Nog niet gekocht</div>
         <div id="simSub" class="small muted">Koopt zodra het koopadvies KOOP zegt.</div>
+        <div id="simExit" class="small"></div>
         <div id="simPrev" class="small muted"></div>
       </div>
       <div class="right">
@@ -192,6 +193,19 @@ td.wrap { white-space: normal; text-align: left; }
       <label>fee + slippage <input id="setFee" type="text" inputmode="decimal">pt</label>
       <label><input id="setNotify" type="checkbox"> geluid + melding bij KOOP</label>
     </div>
+    <div class="inline small settings">
+      <span class="muted">Instappen:</span>
+      <select id="setEntry" aria-label="Manier van instappen"><option value="market">direct kopen (vraagprijs)</option><option value="limit">bod plaatsen (limietorder)</option></select>
+      <label class="lim">bod = bied + <input id="setLimOff" type="text" inputmode="decimal">¢</label>
+      <label class="lim">fee bij bod <input id="setMakerFee" type="text" inputmode="decimal">pt</label>
+    </div>
+    <div class="inline small settings">
+      <span class="muted">Uitstappen:</span>
+      <select id="setExit" aria-label="Manier van uitstappen"><option value="hold">vasthouden tot het einde</option><option value="model">slim verkopen (markt betaalt meer dan de kans)</option><option value="tpsl">vaste grenzen (winst pakken / verlies beperken)</option></select>
+      <label class="ex-model">marge <input id="setExitMargin" type="text" inputmode="decimal">pt</label>
+      <label class="ex-tpsl">winst pakken bij <input id="setTp" type="text" inputmode="decimal">¢</label>
+      <label class="ex-tpsl">verlies beperken bij <input id="setSl" type="text" inputmode="decimal">¢</label>
+    </div>
     <p class="small muted" style="margin:8px 0 0">* <b>Max prijs</b> = slagingskans − (min. voordeel + fee): betaal je meer, dan verdien je er gemiddeld niets aan. <b>Winst als goed</b> = wat je per ingelegde $1 wint als je precies de max prijs betaalt en het uitkomt. Hoge slagingskans (laat in het venster) betekent bijna altijd een hoge prijs en dus kleine winst per keer; eerder instappen geeft meer rendement maar vaker verlies. Dit is een rekenhulp, geen financieel advies.</p>
   </section>
 
@@ -205,7 +219,9 @@ td.wrap { white-space: normal; text-align: left; }
         <canvas id="btChart" aria-label="Opgetelde winst per trade"></canvas>
       </div>
       <div>
-        <div class="label">Welke instellingen hadden het meest opgeleverd? (rendement per inzet · aantal trades)</div>
+        <div class="label">Instappen en uitstappen vergeleken (zelfde koopsignalen)</div>
+        <div class="tablewrap"><table><thead><tr><th>Instappen</th><th>Uitstappen</th><th>trades</th><th>gevuld</th><th>positief</th><th>totaal</th><th>per trade</th></tr></thead><tbody id="btStrat"></tbody></table></div>
+        <div class="label" style="margin-top:10px">Welke drempels hadden het meest opgeleverd? (met jouw in-/uitstapkeuze · rendement per inzet · aantal trades)</div>
         <div class="tablewrap"><table><thead><tr id="btGridHead"></tr></thead><tbody id="btGrid"></tbody></table></div>
         <div id="btMarket" class="edge small">–</div>
       </div>
@@ -349,6 +365,8 @@ td.wrap { white-space: normal; text-align: left; }
       <li id="exSource"></li>
       <li><strong>Prijsbronnen:</strong> onder de prijzen bovenaan zie je Binance, Coinbase en Chainlink naast elkaar, met het verschil t.o.v. Binance. Een groen bolletje = live. De modellen en patronen zijn getraind op Binance-data (daar is gratis historie van); de live kans en het koopadvies gebruiken de afrekenbron.</li>
       <li><strong>Terugtest:</strong> zolang de pagina openstaat, slaat hij elke paar seconden de echte Polymarket-prijzen en de voorspelling op (alleen in jouw browser). Na elk venster zie je wat het koopadvies had opgeleverd, welke instellingen het best hadden gewerkt, en of het model of de markt de kans beter inschatte. Met "Download opnames" kun je de data bewaren of naar iemand sturen.</li>
+      <li><strong>Instappen met een bod (limietorder):</strong> in plaats van de vraagprijs te betalen, zet je een bod een cent boven de hoogste bieder (nooit boven de max prijs). In de simulatie telt het bod pas als gevuld als iemand <em>onder</em> jouw bod wil verkopen — dat is voorzichtig gerekend. Het bod wordt ingetrokken als het advies wegvalt of als er minder dan 15 s over is. Bij een bod betaal je op Polymarket meestal geen fee.</li>
+      <li><strong>Uitstappen vóór het einde:</strong> "slim verkopen" verkoopt zodra de biedprijs (na fee) hoger is dan de kans dat je wint plus je marge — dan betaalt de markt meer dan je positie waard is. "Vaste grenzen" verkoopt bij een vaste winst- of verliesgrens. Verkopen gebeurt tegen de biedprijs, met jouw fee.</li>
       <li><strong>Koopadvies:</strong> een koopsignaal komt alleen als (1) de conservatieve slagingskans (de laagste van het model en de historie) boven jouw minimum ligt, (2) de historie het bevestigt, (3) order flow en sweeps niet tegen je richting in gaan, en (4) de Polymarket-prijs onder de max prijs ligt. De inzet-suggestie is een kwart van het Kelly-criterium, maximaal 5% van je potje.</li>
       <li><strong>Statistische kans:</strong> hoe ver de prijs nu boven/onder de open staat, gedeeld door hoeveel BTC normaal beweegt in de resterende tijd (volatiliteit uit de laatste uren). Hoe minder tijd over, hoe zekerder.</li>
       <li><strong>Signalen:</strong> order flow (wie koopt/verkoopt agressief), het orderboek, momentum, trend en RSI schuiven de kans een beetje op (maximaal ±10 procentpunt rond 50%). Dit zijn vuistregels, geen bewezen voorspellers — het orderboek kan bijvoorbeeld nep-orders (spoofing) bevatten.</li>
@@ -416,14 +434,14 @@ const S = {
   track: [],
   curWs: null,
   gen: 0,                // verhoogd bij elke wissel van tijdsframe; oude berekeningen worden dan genegeerd
-  cfg: { minP: 0.75, edge: 0.04, fee: 0.02, th: 0.8 },
+  cfg: { minP: 0.75, edge: 0.04, fee: 0.02, th: 0.8, entry: 'market', limOff: 0.01, makerFee: 0, exit: 'hold', exitMargin: 0.03, tp: 0.9, sl: 0.25 },
   entryCache: {},
   levels: null,
   // extra prijsbronnen: Coinbase spot, Chainlink spot en Chainlink 60s-TWAP (via Polymarket)
   src: { cb: { ticks: [], last: 0, fails: 0 }, cl: { ticks: [], last: 0, fails: 0 }, tw: { ticks: [], last: 0 } },
   rec: { pending: new Map(), last: 0, error: null, bt: null },   // pending: 'tf|ws' -> { open, feed }
   notified: null,
-  sim: null,             // gesimuleerde aankopen: 'tf|ws' -> { t, side, price, pHat, open, feed, res }
+  sim: null,             // live simulatie per venster: 'tf|ws' -> { ws, pos, stamps, open, feed, res }
   ws: null, wsIdx: 0, wsFails: 0, lastMsg: 0, reconnectTimer: null,
   last: null,
 };
@@ -2396,59 +2414,162 @@ function notifyBuy(a, adv) {
   } catch {}
 }
 
-// Eerste KOOP-signaal per venster vastleggen (blijft staan, ook na herladen)
-const SIM_KEY = 'btc.simbuys.v1';
+// ---------- Handelsmotor: één venster stap voor stap (gedeeld door live simulatie en terugtest) ----------
+// pos.stage: 'wait' (nog niets) → 'order' (bod staat open) → 'held' (gekocht) → 'sold' (vóór het einde verkocht).
+// x = adviseCore-invoer plus bied/vraag van beide kanten: { pu, an, sc, sw, no, secs, el, ua, da, ub, db }
+const EXIT_NAMES = { hold: 'vasthouden', model: 'slim verkopen', tpsl: 'vaste grenzen' };
+const ENTRY_NAMES = { market: 'direct kopen', limit: 'bod plaatsen' };
+
+// Bod voor een limietorder: een cent boven de hoogste bieder, nooit boven de max prijs, in hele centen
+function limitPrice(r, x, cfg) {
+  const bid = r.up ? x.ub : x.db, ask = r.cost;
+  const base = bid != null ? bid : ask != null ? ask - 0.02 : null;
+  if (base == null || !(r.maxPrice > 0)) return null;
+  const L = Math.floor(Math.min(r.maxPrice, base + cfg.limOff) * 100 + 1e-6) / 100;
+  return L >= 0.01 ? L : null;
+}
+
+function tradeStep(pos, x, cfg) {
+  pos = pos || { stage: 'wait' };
+  if (pos.stage === 'sold') return pos;
+  const r = adviseCore(x, cfg);
+  if (pos.stage === 'wait') {
+    if (cfg.entry === 'limit') {
+      if (!r.allButPrice || !(r.maxPrice > 0)) return pos;
+      const L = limitPrice(r, x, cfg);
+      if (L == null) return pos;
+      if (r.cost != null && r.cost <= L) {   // bod raakt meteen de vraagprijs: gewoon direct gekocht (met taker-fee)
+        return { ...pos, stage: 'held', side: r.side, up: r.up, entry: r.cost, fee: cfg.fee, entryEl: x.el, pHat: r.pHat, how: 'direct', placed: true };
+      }
+      return { ...pos, stage: 'order', side: r.side, up: r.up, L, placedEl: x.el, pHat: r.pHat, placed: true };
+    }
+    if (r.buy) return { ...pos, stage: 'held', side: r.side, up: r.up, entry: r.cost, fee: cfg.fee, entryEl: x.el, pHat: r.pHat, how: 'direct' };
+    return pos;
+  }
+  if (pos.stage === 'order') {
+    const ask = pos.up ? x.ua : x.da;
+    // voorzichtig: alleen gevuld als iemand ONDER ons bod verkoopt
+    if (ask != null && ask < pos.L - 1e-9) return { ...pos, stage: 'held', entry: pos.L, fee: cfg.makerFee, entryEl: x.el, how: 'bod' };
+    if (!(r.side === pos.side && r.allButPrice) || x.secs < 15) return { ...pos, stage: 'wait', cancelled: (pos.cancelled || 0) + 1, cancelEl: x.el };
+    return pos;
+  }
+  // pos.stage === 'held': eventueel vóór het einde verkopen (tegen de biedprijs, met taker-fee)
+  if (cfg.exit === 'hold' || x.secs < 5) return pos;
+  const bid = pos.up ? x.ub : x.db;
+  if (bid == null) return pos;
+  const net = bid - cfg.fee, pHold = pos.up ? x.pu : 1 - x.pu;
+  let reason = null;
+  if (cfg.exit === 'model' && net >= pHold + cfg.exitMargin) reason = net >= pos.entry + pos.fee ? 'winst pakken' : 'verlies beperken';
+  if (cfg.exit === 'tpsl') reason = bid >= cfg.tp ? 'winst pakken' : bid <= cfg.sl ? 'verlies beperken' : null;
+  return reason ? { ...pos, stage: 'sold', exit: net, exitBid: bid, exitEl: x.el, reason } : pos;
+}
+
+// Winst per $1 inzet: kopen voor (prijs + fee) per share; verkocht → opbrengst, anders $1 of $0 bij de uitslag
+function tradePnl(pos, res) {
+  if (!pos || (pos.stage !== 'held' && pos.stage !== 'sold')) return null;
+  const shares = 1 / (pos.entry + pos.fee);
+  if (pos.stage === 'sold') return shares * pos.exit - 1;
+  return res == null ? null : res === pos.side ? shares - 1 : -1;
+}
+
+// ---------- Live simulatie (vakje naast het venster; blijft staan, ook na herladen) ----------
+const SIM_KEY = 'btc.simtrades.v2';
 function simLoad() { try { return JSON.parse(localStorage.getItem(SIM_KEY)) || {}; } catch { return {}; } }
 function simSave() {
   try {
-    const keys = Object.keys(S.sim).sort((x, y) => S.sim[x].t - S.sim[y].t);
+    const keys = Object.keys(S.sim).sort((x, y) => S.sim[x].ws - S.sim[y].ws);
     for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete S.sim[k];
     localStorage.setItem(SIM_KEY, JSON.stringify(S.sim));
   } catch {}
 }
-function simCapture(a, adv, now) {
-  if (!adv.state.startsWith('buy')) return;
+
+// Live invoer voor de handelsmotor (alleen met een verse Polymarket-prijs; eigen invoer telt als vraagprijs)
+function liveTradeInput(a, now) {
+  const x = liveAdviceInput(a, now), pm = S.pm;
+  const fresh = pm && pm.ws === a.ws && pm.gen === S.gen && pm.updated && now - pm.updated < 15000;
+  x.ub = fresh && pm.up ? pm.up.bid : null;
+  x.db = fresh && pm.down ? pm.down.bid : null;
+  x.el = Math.round((now - a.ws) / 1000);
+  return x;
+}
+
+function simStep(a, now) {
   if (!S.sim) S.sim = simLoad();
-  const key = `${TF.key}|${a.ws}`;
-  if (S.sim[key]) return;
-  S.sim[key] = { t: now, side: adv.side, price: adv.cost, pHat: adv.pHat, open: a.op.px, feed: a.op.feed, ws: a.ws };
+  if (a.pSig == null || !a.sg || !a.op) return;
+  const key = `${TF.key}|${a.ws}`, cur = S.sim[key] || { ws: a.ws, pos: null };
+  const before = cur.pos ? cur.pos.stage : 'none';
+  const pos = tradeStep(cur.pos, liveTradeInput(a, now), S.cfg);
+  if (pos === cur.pos) return;
+  const after = pos.stage;
+  if (after === before && after === 'wait' && (pos.cancelled || 0) === ((cur.pos && cur.pos.cancelled) || 0)) return;
+  const stamps = { ...(cur.stamps || {}) };
+  if (after === 'order') stamps.placed = now;
+  if (after === 'held' && before !== 'held') stamps.bought = now;
+  if (after === 'sold') stamps.sold = now;
+  if (after === 'wait' && before === 'order') stamps.cancelled = now;
+  S.sim[key] = { ...cur, pos, stamps, open: a.op.px, feed: a.op.feed, entryMode: S.cfg.entry, exitMode: S.cfg.exit };
   simSave();
 }
 
+const hhmmss = t => new Date(t).toLocaleTimeString('nl-NL');
 function renderSimBox(a, now) {
   if (!S.sim) S.sim = simLoad();
-  const cur = S.sim[`${TF.key}|${a.ws}`];
-  const box = $('simBox');
-  box.className = 'simbox' + (cur ? (cur.side === 'UP' ? ' up' : ' down') : '');
-  if (cur) {
-    const tStr = new Date(cur.t).toLocaleTimeString('nl-NL');
-    $('simHead').textContent = `${cur.side} gekocht om ${tStr}`;
-    $('simHead').className = 'big mono ' + (cur.side === 'UP' ? 'up-c' : 'down-c');
-    $('simSub').textContent = `Prijs ${cents(cur.price)} · kans ${fmtPct(cur.pHat, 0)} · ${Math.round((cur.t - a.ws) / 1000 / 60 * 10) / 10} min na de start`;
+  const cur = S.sim[`${TF.key}|${a.ws}`], pos = cur && cur.pos, st = (cur && cur.stamps) || {};
+  const box = $('simBox'), head = $('simHead'), sub = $('simSub'), ex = $('simExit');
+  const sideCls = pos && pos.side ? (pos.side === 'UP' ? 'up' : 'down') : '';
+  box.className = 'simbox' + (pos && (pos.stage === 'held' || pos.stage === 'sold') ? ' ' + sideCls : '');
+  head.className = 'big mono' + (sideCls && pos.stage !== 'wait' ? ` ${sideCls}-c` : '');
+  ex.textContent = ''; ex.className = 'small';
+  const pm = S.pm, live = side => pm && pm.ws === a.ws && pm[side] ? pm[side] : null;
+  if (!pos || pos.stage === 'wait') {
+    head.textContent = 'Nog niet gekocht';
+    sub.textContent = pos && pos.cancelled
+      ? `Bod ${pos.cancelled}× ingetrokken (laatst om ${hhmmss(st.cancelled)}) — wacht op een nieuw signaal.`
+      : S.cfg.entry === 'limit' ? 'Plaatst een bod zodra het koopadvies groen licht geeft.' : 'Koopt zodra het koopadvies KOOP zegt.';
+  } else if (pos.stage === 'order') {
+    const q = live(pos.up ? 'up' : 'down');
+    head.textContent = `Bod ${pos.side} ${cents(pos.L)} staat open`;
+    sub.textContent = `Geplaatst om ${hhmmss(st.placed)}` + (q ? ` · nu bied ${cents(q.bid)} / vraag ${cents(q.ask)}` : '') + ` · gevuld zodra iemand onder ${cents(pos.L)} verkoopt.`;
   } else {
-    $('simHead').textContent = 'Nog niet gekocht';
-    $('simHead').className = 'big mono';
-    $('simSub').textContent = 'Koopt zodra het koopadvies KOOP zegt.';
+    const bought = `${pos.side} gekocht om ${hhmmss(st.bought)}`;
+    if (pos.stage === 'sold') {
+      const pnl = tradePnl(pos);
+      head.textContent = `${pos.side} verkocht om ${hhmmss(st.sold)}`;
+      sub.textContent = `${bought} voor ${cents(pos.entry)} (${pos.how}) → verkocht voor ${cents(pos.exitBid)} (${pos.reason}) · ${pnl >= 0 ? '+' : '−'}${fmtPct(Math.abs(pnl), 0)}`;
+    } else {
+      head.textContent = bought;
+      sub.textContent = `Voor ${cents(pos.entry)} (${pos.how === 'bod' ? 'bod gevuld' : 'direct'}) · kans ${fmtPct(pos.pHat, 0)} · ${Math.round((st.bought - a.ws) / 6000) / 10} min na de start`;
+      // wat levert verkopen nu op vs. houden?
+      const q = live(pos.up ? 'up' : 'down');
+      if (q && q.bid != null && a.pSig != null) {
+        const net = q.bid - S.cfg.fee, pHold = pos.up ? a.pSig : 1 - a.pSig;
+        const sellPnl = net / (pos.entry + pos.fee) - 1, holdEv = pHold / (pos.entry + pos.fee) - 1;
+        const better = net >= pHold + S.cfg.exitMargin;
+        ex.className = 'small ' + (better ? 'warn-c' : 'muted');
+        ex.textContent = `Nu verkopen: ${cents(q.bid)} → ${sellPnl >= 0 ? '+' : '−'}${fmtPct(Math.abs(sellPnl), 0)} · houden is gemiddeld ${holdEv >= 0 ? '+' : '−'}${fmtPct(Math.abs(holdEv), 0)} waard` +
+          (better ? ' → verkopen is nu gunstiger' : ' → houden') + (S.cfg.exit === 'hold' ? ' (strategie: vasthouden)' : '');
+      }
+    }
   }
-  // uitslag van de aankoop in het vorige venster
-  const prevWs = a.ws - WIN, prev = S.sim[`${TF.key}|${prevWs}`];
-  let txt = '';
-  if (prev) {
-    if (!prev.res) {
+  // uitslag van het vorige venster
+  const prevWs = a.ws - WIN, prev = S.sim[`${TF.key}|${prevWs}`], pp = prev && prev.pos;
+  let txt = 'Vorig venster: geen aankoop.';
+  if (pp && (pp.stage === 'held' || pp.stage === 'sold')) {
+    if (pp.stage === 'held' && !prev.res) {
       const out = windowOutcome(prevWs, prev.open, prev.feed, TF, now);
       if (out) { prev.res = out.res; simSave(); }
     }
-    const won = prev.res && prev.res === prev.side;
-    txt = `Vorig venster: ${prev.side} gekocht om ${new Date(prev.t).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })} voor ${cents(prev.price)} → ` +
-      (!prev.res ? 'uitslag nog niet bekend' : won ? `gewonnen (+${fmtPct(1 / (prev.price + S.cfg.fee) - 1, 0)})` : 'verloren');
-  } else txt = 'Vorig venster: geen aankoop.';
+    const pnl = tradePnl(pp, prev.res);
+    txt = `Vorig venster: ${pp.side} voor ${cents(pp.entry)}` + (pp.stage === 'sold' ? `, verkocht voor ${cents(pp.exitBid)}` : '') + ' → ' +
+      (pnl == null ? 'uitslag nog niet bekend' : pnl >= 0 ? `+${fmtPct(pnl, 0)}` : pnl <= -0.999 ? 'verloren' : `−${fmtPct(-pnl, 0)}`);
+  } else if (pp && pp.stage === 'order') txt = 'Vorig venster: bod niet gevuld.';
   $('simPrev').textContent = txt;
 }
 
 function renderAdvice(a, now) {
   const adv = computeAdvice(a, now);
   notifyBuy(a, adv);
-  simCapture(a, adv, now);
+  simStep(a, now);
   renderSimBox(a, now);
   const box = $('signal');
   box.className = 'signal' + (adv.state === 'wait' ? '' : ' ' + adv.state);
@@ -2465,6 +2586,12 @@ function renderAdvice(a, now) {
       (adv.winReturn != null ? `winst als het goed gaat +${fmtPct(adv.winReturn, 0)}` : 'geen winst mogelijk, zelfs als het goed gaat') +
       `, verwachte waarde ${adv.ev >= 0 ? '+' : '−'}${fmtPct(Math.abs(adv.ev), 1)} per inzet.`);
     lines.push(adv.kelly > 0 ? `Voorzichtige inzet: max ${fmtPct(adv.kelly, 1)} van je potje (kwart-Kelly).` : 'Inzet: niets — bij deze prijs is er geen voordeel.');
+  }
+  if (S.cfg.entry === 'limit' && adv.maxPrice > 0) {
+    const x = liveTradeInput(a, now), r = adviseCore(x, S.cfg), L = limitPrice(r, x, S.cfg);
+    if (L != null) lines.push(adv.cost != null && adv.cost <= L
+      ? `Bod-suggestie: niet nodig — de vraagprijs (${cents(adv.cost)}) ligt al op of onder je bod van ${cents(L)}, dus direct kopen.`
+      : `Bod-suggestie: ${adv.side} voor ${cents(L)} (bied ${cents(adv.up ? x.ub : x.db)}, vraag ${cents(adv.cost)}) — scheelt ${adv.cost != null ? cents(adv.cost - L) : '?'} per share als het gevuld wordt.`);
   }
   nums.textContent = lines.join(' ');
 }
@@ -2562,25 +2689,29 @@ async function loadRecordings(tf) {
   return { snaps, outs };
 }
 
-// Simuleer het koopadvies op de opnames: per venster de eerste keer dat het advies "KOOP" zei
+// Simuleer het advies + de gekozen in-/uitstapmanier op de opnames (max één positie per venster)
 function simulate(byWin, outMap, cfg) {
   const trades = [];
+  let placed = 0, filled = 0;
   for (const [ws, snaps] of byWin) {
     const out = outMap.get(ws);
     if (!out) continue;
+    let pos = null;
     for (const sn of snaps) {
-      const r = adviseCore({ ...sn, secs: WM * 60 - sn.el }, cfg);
-      if (!r.buy) continue;
-      const eff = r.cost + cfg.fee, win = out.res === r.side;
-      trades.push({ ws, side: r.side, price: r.cost, el: sn.el, pHat: r.pHat, win, pnl: win ? 1 / eff - 1 : -1 });
-      break;
+      pos = tradeStep(pos, { ...sn, secs: WM * 60 - sn.el }, cfg);
+      if (pos.stage === 'sold') break;
     }
+    if (pos && pos.placed) placed++;
+    if (!pos || (pos.stage !== 'held' && pos.stage !== 'sold')) continue;
+    if (pos.placed) filled++;
+    const pnl = tradePnl(pos, out.res);
+    trades.push({ ws, side: pos.side, price: pos.entry, el: pos.entryEl, pHat: pos.pHat, win: pnl > 0, sold: pos.stage === 'sold', pnl });
   }
   const n = trades.length, wins = trades.filter(t => t.win).length;
   const total = trades.reduce((s, t) => s + t.pnl, 0);
   let cum = 0, peak = 0, dd = 0;
   for (const t of trades) { cum += t.pnl; peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum); }
-  return { trades, n, wins, total, roi: n ? total / n : null, dd };
+  return { trades, n, wins, total, roi: n ? total / n : null, dd, placed, filled, sold: trades.filter(t => t.sold).length };
 }
 
 async function runBacktest() {
@@ -2611,12 +2742,16 @@ async function runBacktest() {
       bm += ((sn.ub + sn.ua) / 2 - y) ** 2; bp += (sn.pu - y) ** 2; nb++;
     }
   }
+  const strat = [];
+  for (const entry of ['market', 'limit']) for (const exit of ['hold', 'model', 'tpsl']) {
+    strat.push({ entry, exit, ...simulate(byWin, outMap, { ...S.cfg, entry, exit }) });
+  }
   const grid = [];
   for (const minP of [0.6, 0.7, 0.8, 0.9]) for (const edge of [0.02, 0.04, 0.08]) {
     const r = simulate(byWin, outMap, { ...S.cfg, minP, edge });
     grid.push({ minP, edge, n: r.n, roi: r.roi });
   }
-  S.rec.bt = { windows: byWin.size, resolved: [...byWin.keys()].filter(ws => outMap.has(ws)).length, snaps: snaps.length, main, grid,
+  S.rec.bt = { windows: byWin.size, resolved: [...byWin.keys()].filter(ws => outMap.has(ws)).length, snaps: snaps.length, main, grid, strat,
     market: nb ? { n: nb, model: bp / nb, market: bm / nb } : null,
     srcs: [...byWin.keys()].map(ws => outMap.get(ws)).filter(Boolean).reduce((m, o) => (m[o.src] = (m[o.src] || 0) + 1, m), {}) };
   renderBacktest();
@@ -2628,15 +2763,17 @@ function renderBacktest() {
   if (!bt || !bt.snaps) {
     $('btSum').textContent = `Nog geen opnames voor ${TF.label}. Zolang deze pagina openstaat, worden elke paar seconden de Polymarket-prijzen en de voorspellingen opgeslagen (alleen in deze browser).`;
     $('btStats').innerHTML = '<tr><td class="muted">Nog geen opnames voor dit tijdsframe. Laat de pagina open staan; elke paar seconden wordt de Polymarket-prijs vastgelegd.</td></tr>';
-    $('btGrid').innerHTML = ''; $('btGridHead').innerHTML = ''; $('btMarket').textContent = '–'; drawBtChart(null);
+    $('btGrid').innerHTML = ''; $('btGridHead').innerHTML = ''; $('btStrat').innerHTML = ''; $('btMarket').textContent = '–'; drawBtChart(null);
     return;
   }
   const m = bt.main, srcTxt = Object.entries(bt.srcs).map(([k, v]) => `${v}× ${k}`).join(', ');
-  $('btSum').textContent = `${bt.windows} vensters opgenomen (${bt.snaps} momentopnames), ${bt.resolved} met uitslag${srcTxt ? ` — uitslag bepaald via ${srcTxt}` : ''}. Met jouw huidige instellingen:`;
+  $('btSum').textContent = `${bt.windows} vensters opgenomen (${bt.snaps} momentopnames), ${bt.resolved} met uitslag${srcTxt ? ` — uitslag bepaald via ${srcTxt}` : ''}. Met jouw huidige instellingen (${ENTRY_NAMES[S.cfg.entry]}, ${EXIT_NAMES[S.cfg.exit]}):`;
   const row = (k, v, cls = '') => `<tr><td>${k}</td><td class="mono ${cls}">${v}</td></tr>`;
   $('btStats').innerHTML = m.n
     ? row('Trades (max 1 per venster)', m.n) +
-      row('Gewonnen', `${m.wins} (${fmtPct(m.wins / m.n, 0)})`, m.wins / m.n >= S.cfg.minP ? 'ok' : 'bad') +
+      (m.placed ? row('Bod gevuld', `${m.filled} van ${m.placed} (${fmtPct(m.filled / m.placed, 0)})`) : '') +
+      row('Met winst afgesloten', `${m.wins} (${fmtPct(m.wins / m.n, 0)})`, m.wins / m.n >= 0.5 ? 'ok' : 'bad') +
+      (m.sold ? row('Vóór het einde verkocht', `${m.sold}×`) : '') +
       row('Totale winst bij $1 per trade', `${m.total >= 0 ? '+' : '−'}$${Math.abs(m.total).toFixed(2)}`, m.total >= 0 ? 'ok' : 'bad') +
       row('Rendement per trade', `${m.roi >= 0 ? '+' : '−'}${fmtPct(Math.abs(m.roi), 1)}`, m.roi >= 0 ? 'ok' : 'bad') +
       row('Grootste tussentijdse daling', `−$${m.dd.toFixed(2)}`) +
@@ -2650,6 +2787,16 @@ function renderBacktest() {
     const cur = Math.abs(minP - S.cfg.minP) < 1e-9 && Math.abs(edge - S.cfg.edge) < 1e-9;
     return `<td class="mono ${g.roi == null ? 'muted' : g.roi >= 0 ? 'ok' : 'bad'}"${cur ? ' style="outline:2px solid var(--accent)"' : ''}>${g.roi == null ? '–' : `${g.roi >= 0 ? '+' : '−'}${fmtPct(Math.abs(g.roi), 0)}`} <span class="muted">· ${g.n}</span></td>`;
   }).join('') + '</tr>').join('');
+  const money = v => v == null ? '–' : `${v >= 0 ? '+' : '−'}${fmtPct(Math.abs(v), 1)}`;
+  const best = bt.strat.filter(x => x.n >= 10).sort((x, y) => y.roi - x.roi)[0];
+  $('btStrat').innerHTML = bt.strat.map(x => {
+    const cur = x.entry === S.cfg.entry && x.exit === S.cfg.exit;
+    return `<tr${x === best ? ' class="best"' : ''}${cur ? ' style="outline:2px solid var(--accent)"' : ''}><td>${ENTRY_NAMES[x.entry]}</td><td>${EXIT_NAMES[x.exit]}</td>` +
+      `<td class="mono">${x.n}</td><td class="mono">${x.placed ? fmtPct(x.filled / x.placed, 0) : '–'}</td>` +
+      `<td class="mono">${x.n ? fmtPct(x.wins / x.n, 0) : '–'}</td>` +
+      `<td class="mono ${x.total >= 0 ? 'ok' : 'bad'}">${x.n ? `${x.total >= 0 ? '+' : '−'}$${Math.abs(x.total).toFixed(2)}` : '–'}</td>` +
+      `<td class="mono ${x.roi == null ? 'muted' : x.roi >= 0 ? 'ok' : 'bad'}">${money(x.roi)}</td></tr>`;
+  }).join('');
   const mk = bt.market;
   $('btMarket').textContent = mk
     ? `Wie schatte de kans beter in? Model: Brier ${mk.model.toFixed(3)}, Polymarket-prijs: Brier ${mk.market.toFixed(3)} (lager = beter, ${mk.n} momenten). ` +
@@ -2806,7 +2953,8 @@ function wireUi() {
   for (const b of $('tfTabs').children) b.onclick = () => setTF(b.dataset.tf);
   window.addEventListener('hashchange', () => { const k = location.hash.slice(1); if (TIMEFRAMES[k]) setTF(k); });
   // instellingen koopadvies (in procenten/punten ingevuld, intern als fractie)
-  const fields = [['setMinP', 'minP', 50, 99], ['setEdge', 'edge', 0, 30], ['setFee', 'fee', 0, 20]];
+  const fields = [['setMinP', 'minP', 50, 99], ['setEdge', 'edge', 0, 30], ['setFee', 'fee', 0, 20],
+    ['setLimOff', 'limOff', 0, 10], ['setMakerFee', 'makerFee', 0, 20], ['setExitMargin', 'exitMargin', 0, 30], ['setTp', 'tp', 5, 99], ['setSl', 'sl', 1, 95]];
   for (const [id, key] of fields) $(id).value = +(S.cfg[key] * 100).toFixed(1);
   $('thSel').value = String(S.cfg.th);
   const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(S.cfg)); } catch {} };
@@ -2815,9 +2963,18 @@ function wireUi() {
       const v = parseFloat(String(e.target.value).replace(',', '.'));
       if (isFinite(v)) S.cfg[key] = clamp(v, lo, hi) / 100;
       e.target.value = +(S.cfg[key] * 100).toFixed(1);
-      saveCfg(); renderEntry();
+      saveCfg(); renderEntry(); runBacktest();
     });
   }
+  // in-/uitstapkeuze; alleen de bijbehorende velden tonen
+  const showOpts = () => {
+    document.querySelectorAll('.lim').forEach(el => { el.style.display = S.cfg.entry === 'limit' ? '' : 'none'; });
+    document.querySelectorAll('.ex-model').forEach(el => { el.style.display = S.cfg.exit === 'model' ? '' : 'none'; });
+    document.querySelectorAll('.ex-tpsl').forEach(el => { el.style.display = S.cfg.exit === 'tpsl' ? '' : 'none'; });
+  };
+  $('setEntry').value = S.cfg.entry; $('setExit').value = S.cfg.exit; showOpts();
+  $('setEntry').addEventListener('change', e => { S.cfg.entry = e.target.value; saveCfg(); showOpts(); runBacktest(); });
+  $('setExit').addEventListener('change', e => { S.cfg.exit = e.target.value; saveCfg(); showOpts(); runBacktest(); });
   $('thSel').addEventListener('change', e => { S.cfg.th = +e.target.value; saveCfg(); renderEntry(); });
   $('setNotify').checked = !!S.cfg.notify;
   // geluid mag pas na een klik/toets van de gebruiker starten
@@ -2840,13 +2997,15 @@ function wireUi() {
   $('btExport').onclick = () => exportRecordings();
   $('btClear').onclick = () => clearRecordings();
   // bij gewijzigde instellingen de terugtest opnieuw tonen
-  for (const id of ['setMinP', 'setEdge', 'setFee']) $(id).addEventListener('change', () => runBacktest());
+
 }
 
 function loadCfg() {
   try {
     const c = JSON.parse(localStorage.getItem(CFG_KEY));
-    if (c) for (const k of ['minP', 'edge', 'fee', 'th']) if (isFinite(c[k])) S.cfg[k] = +c[k];
+    if (c) for (const k of ['minP', 'edge', 'fee', 'th', 'limOff', 'makerFee', 'exitMargin', 'tp', 'sl']) if (c[k] != null && isFinite(c[k])) S.cfg[k] = +c[k];
+    if (c && ['market', 'limit'].includes(c.entry)) S.cfg.entry = c.entry;
+    if (c && ['hold', 'model', 'tpsl'].includes(c.exit)) S.cfg.exit = c.exit;
     if (c && typeof c.notify === 'boolean') S.cfg.notify = c.notify;
   } catch {}
 }
