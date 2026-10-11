@@ -55,7 +55,7 @@ main { display: grid; gap: 12px; padding: 12px 16px 32px; max-width: 1280px; mar
 .progress > div { height: 100%; width: 0; background: var(--accent); }
 .prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
 .probbar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; background: var(--panel-2); }
-.probbar > div { display: flex; align-items: center; padding: 0 10px; font-weight: 700; color: #fff; white-space: nowrap; transition: width .4s; min-width: 0; overflow: hidden; }
+.probbar > div { display: flex; align-items: center; padding: 0 10px; font-weight: 700; color: #fff; white-space: nowrap; min-width: 0; overflow: hidden; }
 .probbar .u { background: var(--up); }
 .probbar .d { background: var(--down); justify-content: flex-end; }
 .verdict { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); }
@@ -113,6 +113,14 @@ tr.best td { background: var(--up-soft); }
 .srcrow b { color: var(--text); font-weight: 600; }
 .srcrow .dot { display: inline-block; vertical-align: middle; margin-right: 4px; }
 #btChart { height: 160px; margin-top: 8px; }
+body.simple [data-adv] { display: none !important; }
+.statusbox { position: relative; }
+.statusbox summary { cursor: pointer; list-style: none; }
+.statusbox summary::-webkit-details-marker { display: none; }
+.statuslist { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; width: min(92vw, 420px); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.statuslist .srow { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.statuslist .srow:last-child { border-bottom: 0; }
+.statuslist .dot { margin-top: 5px; }
 .pgrid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .pgrid > div { min-width: 0; }
 td.wrap { white-space: normal; text-align: left; }
@@ -126,7 +134,13 @@ td.wrap { white-space: normal; text-align: left; }
       <button data-tf="5m" role="tab">5 min</button><button data-tf="15m" role="tab">15 min</button><button data-tf="1h" role="tab">1 uur</button>
     </div>
   </div>
-  <div class="pill"><span id="connDot" class="dot"></span><span id="connText">Starten…</span></div>
+  <div class="headleft">
+    <div class="tabs" id="viewTabs" role="tablist" aria-label="Weergave"><button data-view="simple" role="tab">Eenvoudig</button><button data-view="all" role="tab">Alles</button></div>
+    <details id="statusBox" class="statusbox">
+      <summary class="pill"><span id="connDot" class="dot"></span><span id="connText">Starten…</span><span class="muted">▾</span></summary>
+      <div id="statusList" class="statuslist small"></div>
+    </details>
+  </div>
 </header>
 
 <main>
@@ -195,6 +209,25 @@ td.wrap { white-space: normal; text-align: left; }
     <p class="small muted" style="margin:8px 0 0">* <b>Max prijs</b> = slagingskans − (min. voordeel + fee): betaal je meer, dan verdien je er gemiddeld niets aan. <b>Winst als goed</b> = wat je per ingelegde $1 wint als je precies de max prijs betaalt en het uitkomt. Hoge slagingskans (laat in het venster) betekent bijna altijd een hoge prijs en dus kleine winst per keer; eerder instappen geeft meer rendement maar vaker verlies. Dit is een rekenhulp, geen financieel advies.</p>
   </section>
 
+  <!-- Polymarket -->
+  <section class="card">
+    <h2>Polymarket vergelijking</h2>
+    <div id="pmStatus" class="small muted">Markt zoeken…</div>
+    <div id="pmLinkRow" class="inline small" style="display:none">
+      <input id="pmLinkIn" type="text" placeholder="Plak hier de link van de Polymarket-markt" style="flex:1 1 220px; width:auto">
+      <button id="pmLinkSet">Gebruik link</button>
+    </div>
+    <div class="row"><span>UP <span class="sub">bied / vraag</span></span><span></span><span id="pmUp" class="val mono">–</span></div>
+    <div class="row"><span>DOWN <span class="sub">bied / vraag</span></span><span></span><span id="pmDown" class="val mono">–</span></div>
+    <div class="inline small">
+      <span class="muted">Zelf invullen (¢):</span>
+      <input id="pmUpIn" type="text" inputmode="decimal" placeholder="UP bijv. 55" style="width:96px">
+      <input id="pmDownIn" type="text" inputmode="decimal" placeholder="DOWN bijv. 47" style="width:96px">
+      <span id="pmManAge" class="muted"></span>
+    </div>
+    <div id="edge" class="edge small">–</div>
+  </section>
+
   <!-- Terugtest -->
   <section class="card wide">
     <h2>Terugtest met echte Polymarket-prijzen</h2>
@@ -221,7 +254,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Highs & lows -->
-  <section class="card wide">
+  <section data-adv class="card wide">
     <h2>Highs &amp; lows — belangrijke niveaus en uitbraken</h2>
     <div class="tablewrap"><table><thead><tr><th>Niveau</th><th>Prijs</th><th>Afstand</th><th>Kans geraakt in dit venster</th><th>Status</th></tr></thead><tbody id="levels"><tr><td colspan="5" class="muted">Laden…</td></tr></tbody></table></div>
     <div id="levelSum" class="edge small">–</div>
@@ -229,7 +262,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Kansen -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Kans op UP — drie invalshoeken</h2>
     <div class="row"><span>Statistisch<span class="sub">afstand tot open ÷ verwachte beweging</span></span><span class="pbar"><i id="bStat"></i></span><span id="pStat" class="val mono">–</span></div>
     <div class="row"><span>Met signalen<span id="sigSub" class="sub">+ order flow, orderboek, momentum</span></span><span class="pbar"><i id="bSig"></i></span><span id="pSig" class="val mono">–</span></div>
@@ -237,23 +270,9 @@ td.wrap { white-space: normal; text-align: left; }
     <p class="small muted" style="margin:10px 0 0">De bovenste balk op de pagina gebruikt <b>Met signalen</b>. Als de drie ver uit elkaar liggen: voorzichtig.</p>
   </section>
 
-  <!-- Polymarket -->
-  <section class="card">
-    <h2>Polymarket vergelijking</h2>
-    <div id="pmStatus" class="small muted">Markt zoeken…</div>
-    <div class="row"><span>UP <span class="sub">bied / vraag</span></span><span></span><span id="pmUp" class="val mono">–</span></div>
-    <div class="row"><span>DOWN <span class="sub">bied / vraag</span></span><span></span><span id="pmDown" class="val mono">–</span></div>
-    <div class="inline small">
-      <span class="muted">Zelf invullen (¢):</span>
-      <input id="pmUpIn" type="text" inputmode="decimal" placeholder="UP bijv. 55" style="width:96px">
-      <input id="pmDownIn" type="text" inputmode="decimal" placeholder="DOWN bijv. 47" style="width:96px">
-      <span id="pmManAge" class="muted"></span>
-    </div>
-    <div id="edge" class="edge small">–</div>
-  </section>
 
   <!-- Order flow -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Order flow</h2>
     <div class="row"><span>Agressieve kopers (laatste 60 s)<span class="sub">market buys vs. market sells</span></span><span class="meter"><i id="mFlow1"></i></span><span id="vFlow1" class="val mono">–</span></div>
     <div class="row"><span>Agressieve kopers (5 min)</span><span class="meter"><i id="mFlow5"></i></span><span id="vFlow5" class="val mono">–</span></div>
@@ -264,7 +283,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Indicatoren -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Chart-signalen</h2>
     <div class="row"><span>Momentum (5 min)</span><span class="meter"><i id="mMom"></i></span><span id="vMom" class="val mono">–</span></div>
     <div class="row"><span>Trend (EMA 9 vs 21)</span><span class="meter"><i id="mTrend"></i></span><span id="vTrend" class="val mono">–</span></div>
@@ -275,7 +294,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Volgend venster -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Voorspelling vooraf — volgend venster</h2>
     <div id="nextLabel" class="big mono">–</div>
     <div id="nextStart" class="small muted"></div>
@@ -287,7 +306,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Patroonherkenning -->
-  <section class="card wide">
+  <section data-adv class="card wide">
     <h2>Patroonherkenning — lijkt de chart nu op eerdere momenten?</h2>
     <div class="pgrid">
       <div>
@@ -310,7 +329,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Geleerd model -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Geleerd model — hoe goed is het echt?</h2>
     <div id="modelSum" class="small muted">Wacht op historie…</div>
     <div class="tablewrap"><table><thead><tr><th></th><th>goed</th><th>Brier</th><th>gokken</th><th>n</th></tr></thead><tbody id="modelVal"></tbody></table></div>
@@ -320,13 +339,13 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Recente vensters -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Laatste vensters (Binance)</h2>
     <div class="tablewrap"><table><thead><tr><th>Venster</th><th>Open</th><th>Slot</th><th>Δ</th><th>Uitslag</th></tr></thead><tbody id="recent"></tbody></table></div>
   </section>
 
   <!-- Track record -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Eigen track record (in deze browser)</h2>
     <div id="trackSum" class="small muted">Wordt opgebouwd zolang deze pagina open staat: de voorspelling vooraf en de kans op een paar momenten in het venster worden bewaard en na afloop vergeleken met de uitslag.</div>
     <div class="tablewrap"><table><thead><tr id="trackHead"></tr></thead><tbody id="track"></tbody></table></div>
@@ -334,7 +353,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Modelcheck -->
-  <section class="card">
+  <section data-adv class="card">
     <h2>Modelcheck (laatste <span class="histDays">21</span> dagen)</h2>
     <div id="calibSum" class="small muted">Historie laden…</div>
     <div class="tablewrap"><table><thead><tr><th>Model zei</th><th>gem.</th><th>werkelijk UP</th><th>n</th></tr></thead><tbody id="calib"></tbody></table></div>
@@ -343,7 +362,7 @@ td.wrap { white-space: normal; text-align: left; }
   </section>
 
   <!-- Uitleg -->
-  <section class="card wide explain">
+  <section data-adv class="card wide explain">
     <h2>Hoe werkt het — en waar moet je op letten</h2>
     <ul>
       <li id="exMarket"></li>
@@ -609,8 +628,10 @@ async function refreshKlines(limit = 400) {
   try {
     mergeKlines(await getKlines(limit));
     if (S.price == null && S.klines.length) S.price = S.klines[S.klines.length - 1].c;
+    S.binErr = null; S.binOkAt = Date.now();
     return true;
   } catch (e) {
+    S.binErr = e.message;
     setConn('err', 'Binance niet bereikbaar (' + e.message + ') — opnieuw proberen…');
     return false;
   }
@@ -759,33 +780,70 @@ function ensureHistory() {
   return S.hist.job;
 }
 
-async function loadHistory() {
-  const covered = () => {
-    const h = S.hist.candles;
-    return h.length ? Date.now() - h[0].t : 0;
-  };
-  const needMs = () => TF.histDays * 24 * 60 * MIN;
-  S.hist.error = null;
-  if (covered() >= needMs() - 2 * 60 * MIN) return;
-  const first = !S.hist.candles.length;
-  if (first) S.hist.loading = true; else S.hist.busy = true;
-  S.hist.error = null;
-  const older = [];
-  let end = first ? Date.now() : S.hist.candles[0].t - 1;
-  try {
-    while (covered() + older.length * MIN < needMs()) {
-      const batch = await getKlines(1000, end);
-      if (!batch.length) break;
-      older.unshift(...batch);
-      end = batch[0].t - 1;
-      const pct = S.hist.pct = Math.min(100, Math.round((covered() + older.length * MIN) / needMs() * 100));
-      $('calibSum').textContent = `Historie laden (${TF.histDays} dagen)… ${pct}%`;
-      $('entryTbl').innerHTML = `<tr><td colspan="5" class="muted">Historie laden… ${pct}%</td></tr>`;
+const DAY = 24 * 60 * MIN;
+
+// Candles van [from, to) ophalen in stukken van 1000 minuten, 4 tegelijk (veel sneller dan één voor één)
+async function fetchRange(from, to, onSlice) {
+  const slices = [];
+  for (let t = from; t < to; t += 1000 * MIN) slices.push(t);
+  let next = 0, err = null;
+  const work = async () => {
+    while (next < slices.length && !err) {
+      const t0 = slices[next++];
+      try {
+        const q = `/api/v3/klines?symbol=${SYMBOL}&interval=1m&limit=1000&startTime=${t0}&endTime=${Math.min(to, t0 + 1000 * MIN) - 1}`;
+        onSlice((await binance(q)).map(parseKline), slices.length);
+      } catch (e) { err = e; }
     }
-    mergeOlder(first, older);
+  };
+  await Promise.all(Array.from({ length: Math.min(4, slices.length) }, work));
+  if (err) throw err;
+}
+
+// Historie samenvoegen: ontdubbelen op tijd, alleen gesloten candles, oplopend gesorteerd
+function mergeHist(extra) {
+  const now = Date.now();
+  const m = new Map(S.hist.candles.map(c => [c.t, c]));
+  for (const c of extra) if (c.t + MIN <= now) m.set(c.t, c);
+  for (const c of S.hist.pending || []) m.set(c.t, c);
+  S.hist.pending = [];
+  S.hist.candles = [...m.values()].sort((a, b) => a.t - b.t);
+}
+
+async function loadHistory() {
+  const needMs = TF.histDays * DAY;
+  S.hist.error = null;
+  const h0 = S.hist.candles;
+  if (h0.length && Date.now() - h0[0].t >= needMs - 2 * 60 * MIN && Date.now() - h0[h0.length - 1].t < 3 * MIN) return;
+  const first = !h0.length;
+  if (first) S.hist.loading = true; else S.hist.busy = true;
+  const got = [];
+  let done = 0;
+  const progress = total => {
+    const pct = S.hist.pct = Math.min(100, Math.round(++done / total * 100));
+    $('calibSum').textContent = `Historie laden (${TF.histDays} dagen)… ${pct}%`;
+    $('entryTbl').innerHTML = `<tr><td colspan="5" class="muted">Historie laden… ${pct}%</td></tr>`;
+  };
+  try {
+    // 1) eerder in deze browser bewaarde historie: dan hoeft alleen het ontbrekende stuk opgehaald te worden
+    if (first) {
+      const cached = await loadCandleCache(Date.now() - needMs - DAY);
+      if (cached.length) mergeHist(cached);
+    }
+    // 2) wat ontbreekt: het begin (tot histDays terug) en/of het stuk tot nu
+    const h = S.hist.candles, startT = Date.now() - needMs, ranges = [];
+    if (!h.length) ranges.push([startT, Date.now()]);
+    else {
+      if (h[0].t - startT > 2 * 60 * MIN) ranges.push([startT, h[0].t]);
+      if (Date.now() - h[h.length - 1].t > 2 * MIN) ranges.push([h[h.length - 1].t + MIN, Date.now()]);
+    }
+    const total = ranges.reduce((n, [a, b]) => n + Math.ceil((b - a) / (1000 * MIN)), 0);
+    for (const [a, b] of ranges) await fetchRange(a, b, batch => { got.push(...batch); progress(total); });
+    mergeHist(got);
     S.hist.fails = 0;
+    saveCandleCache(false);
   } catch (e) {
-    mergeOlder(first, older);              // wat al binnen is bewaren; de volgende poging gaat verder
+    mergeHist(got);                          // wat al binnen is bewaren; de volgende poging vult de rest aan
     S.hist.error = e.message;
     S.hist.fails = (S.hist.fails || 0) + 1;
     S.hist.retryAt = Date.now() + Math.min(300000, 15000 * 2 ** (S.hist.fails - 1));
@@ -796,35 +854,44 @@ async function loadHistory() {
   }
 }
 
-function mergeOlder(first, older) {
-  if (!older.length) return;
-  const now = Date.now();
-  if (first) {
-    // kaarsen die tijdens het laden sloten (en de toen nog lopende laatste kaars) samenvoegen
-    const m = new Map(older.filter(c => c.t + MIN <= now).map(c => [c.t, c]));
-    for (const c of S.hist.pending || []) m.set(c.t, c);
-    for (const c of S.klines) if (c.t + MIN <= now && m.size && c.t >= older[0].t) m.set(c.t, c);
-    S.hist.candles = [...m.values()].sort((a, b) => a.t - b.t);
-    S.hist.pending = [];
-  } else {
-    const firstT = S.hist.candles[0].t;
-    S.hist.candles = older.filter(c => c.t < firstT).concat(S.hist.candles);
+// Historie bewaren in deze browser (per UTC-dag), zodat herladen seconden duurt i.p.v. alles opnieuw te downloaden
+async function loadCandleCache(minT) {
+  const rows = await idbReq('candles', 'readonly', st => st.getAll()) || [];
+  const out = [];
+  for (const r of rows) {
+    const d = r.d;
+    for (let i = 0; i + 6 < d.length; i += 7) if (d[i] >= minT) out.push({ t: d[i], o: d[i + 1], h: d[i + 2], l: d[i + 3], c: d[i + 4], v: d[i + 5], tbv: d[i + 6] });
   }
+  return out;
+}
+
+async function saveCandleCache(onlyRecent) {
+  const h = S.hist.candles;
+  if (!h.length) return;
+  const fromT = onlyRecent ? Math.floor((Date.now() - DAY) / DAY) * DAY : 0;   // hele dagen, nooit een halve dag overschrijven
+  const byDay = new Map();
+  for (const c of h) {
+    if (c.t < fromT) continue;
+    const day = Math.floor(c.t / DAY);
+    let a = byDay.get(day);
+    if (!a) byDay.set(day, a = []);
+    a.push(c.t, c.o, c.h, c.l, c.c, c.v, c.tbv);
+  }
+  const oldest = Math.floor((Date.now() - 46 * DAY) / DAY);
+  await idbReq('candles', 'readwrite', st => {
+    for (const [day, a] of byDay) st.put({ day, d: Float64Array.from(a) });
+    st.delete(IDBKeyRange.upperBound(oldest, true));
+  });
 }
 
 // Gat aan het einde van de historie opvullen (na slaapstand of een storing)
 async function backfillHistTail() {
   const h = S.hist.candles;
-  if (!h.length || S.hist.loading) return;
-  let from = h[h.length - 1].t + MIN;
-  for (let i = 0; i < 12 && from + MIN <= Date.now(); i++) {
-    const n = Math.min(1000, Math.ceil((Date.now() - from) / MIN) + 1);
-    const batch = await getKlines(n, Math.min(Date.now(), from + n * MIN));
-    const add = batch.filter(c => c.t >= from && c.t + MIN <= Date.now());
-    if (!add.length) break;
-    for (const c of add) appendHist(c);
-    from = add[add.length - 1].t + MIN;
-  }
+  if (!h.length || S.hist.loading || S.hist.busy) return;
+  const from = h[h.length - 1].t + MIN;
+  if (Date.now() - from < 2 * MIN) return;
+  const got = [];
+  try { await fetchRange(from, Date.now(), batch => got.push(...batch)); } finally { mergeHist(got); }
 }
 
 // Na slaapstand, een storing of als internet terugkomt: alles meteen opnieuw ophalen
@@ -1125,6 +1192,8 @@ function buildKnn() {
     lib.push({ j, t: c[j].t, v, up: c[j + WM].c >= c[j + 1].o, aligned });
   }
   if (lib.length < 2000) return null;
+  const vc = S.knnValCache || (S.knnValCache = {});
+  if (vc[TF.key]) return { lib, sig, c, val: vc[TF.key] };
   // Eerlijke test: buren alleen uit de eerste 70%, testen op vensterstarts in de laatste 30%
   const cut = lib[Math.floor(lib.length * 0.7)].t;
   const train = lib.filter(x => x.t < cut - WIN), test = lib.filter(x => x.t >= cut && x.aligned);
@@ -1137,7 +1206,7 @@ function buildKnn() {
     if (Math.abs(p - 0.5) >= 0.08) { selN++; if (ok) selHit++; }
   }
   const n = test.length;
-  return { lib, sig, c, val: { n, acc: hit / n, brier: brier / n, brierBase: brierBase / n, selN, selAcc: selN ? selHit / selN : null } };
+  return { lib, sig, c, val: (vc[TF.key] = { n, acc: hit / n, brier: brier / n, brierBase: brierBase / n, selN, selAcc: selN ? selHit / selN : null }) };
 }
 
 function knnLive() {
@@ -1423,8 +1492,8 @@ async function findPmEvent(slugs) {
   throw lastErr;
 }
 
-async function loadPolymarket(ws) {
-  const slugs = pmSlugs(ws), gen = S.gen;
+async function loadPolymarket(ws, forced) {
+  const slugs = forced || (S.pmForced && S.pmForced.ws === ws && S.pmForced.tf === TF.key ? [S.pmForced.slug] : pmSlugs(ws)), gen = S.gen;
   slugs.ws = ws;
   const pm = S.pm = { ws, gen, slug: slugs[0], url: `https://polymarket.com/event/${slugs[0]}`, status: 'laden', tokens: null, up: null, down: null, priceToBeat: null };
   try {
@@ -1886,7 +1955,11 @@ function renderHero(a, now, adv) {
     const d = price - a.op.px;
     diffEl.textContent = (d >= 0 ? '+' : '−') + fmtUsd(Math.abs(d));
     colorize(diffEl, d);
-    $('diffSigma').textContent = a.z != null ? `${fmtSigned(a.z, 2)} σ (t.o.v. resterende tijd)` + (TF.src === 'chainlink' ? ' · verwachte 60s-gemiddelde' : '') : '';
+    if (a.z != null && a.sg) {
+      const move = a.op.px * a.sg.sigma * Math.sqrt(Math.max(a.minsLeft, 1 / 60));
+      const need = d >= 0 ? `Voor DOWN moet BTC nog ${fmtUsd(Math.abs(d), 0)} dalen` : `Voor UP moet BTC nog ${fmtUsd(Math.abs(d), 0)} stijgen`;
+      $('diffSigma').textContent = `${need} · normale beweging in de resterende ${fmtCountdown(a.we - now)}: ±${fmtUsd(move, 0)}`;
+    } else $('diffSigma').textContent = '';
   } else { diffEl.textContent = '–'; $('diffSigma').textContent = ''; }
 
   const p = a.pSig;
@@ -1982,7 +2055,7 @@ function renderPM(a) {
   const pm = S.pm, st = $('pmStatus');
   st.textContent = ''; st.className = 'small muted';
   if (!pm || pm.status === 'laden') st.textContent = 'Polymarket-markt zoeken…';
-  else if (pm.status === 'fout') st.textContent = `Polymarket automatisch ophalen lukte niet (${pm.err}). Vul de prijzen hieronder zelf in.`;
+  else if (pm.status === 'fout') st.textContent = `Polymarket-markt niet automatisch gevonden (${pm.err}). Plak de link van de markt hieronder, of vul de prijzen zelf in.`;
   else {
     const link = document.createElement('a');
     link.href = pm.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Open markt op Polymarket';
@@ -1994,6 +2067,7 @@ function renderPM(a) {
     }
   }
   const fmtSide = s => s ? `${cents(s.bid)} / ${cents(s.ask)}` + (s.bid == null && s.ask == null ? ` (mid ${cents(s.mid)})` : '') : '–';
+  $('pmLinkRow').style.display = pm && pm.status === 'fout' ? '' : 'none';
   const pmNow = pm && pm.ws === a.ws && pm.gen === S.gen;
   $('pmUp').textContent = pmNow ? fmtSide(pm.up) : '–';
   $('pmDown').textContent = pmNow ? fmtSide(pm.down) : '–';
@@ -2664,7 +2738,7 @@ function renderSources(a) {
 
 // ---------- Opnemen (IndexedDB) en terugtesten met echte Polymarket-prijzen ----------
 // snaps: één regel per Polymarket-poll (≈ elke 4 s) met prijzen + voorspelling; outcomes: uitslag per venster.
-const DB_NAME = 'btc-updown-analyzer', DB_VER = 1;
+const DB_NAME = 'btc-updown-analyzer', DB_VER = 2;
 let dbPromise = null;
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -2675,6 +2749,7 @@ function openDb() {
       const d = req.result;
       if (!d.objectStoreNames.contains('snaps')) d.createObjectStore('snaps', { autoIncrement: true }).createIndex('tfws', ['tf', 'ws']);
       if (!d.objectStoreNames.contains('outcomes')) d.createObjectStore('outcomes', { keyPath: ['tf', 'ws'] });
+      if (!d.objectStoreNames.contains('candles')) d.createObjectStore('candles', { keyPath: 'day' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error('kan opslag niet openen'));
@@ -2740,18 +2815,25 @@ async function loadRecordings(tf) {
 }
 
 // Simuleer het koopadvies op de opnames: per venster de eerste keer dat het advies "KOOP" zei
-function simulate(byWin, outMap, cfg) {
-  const trades = [];
+function simulate(byWin, outMap, cfg, memo) {
+  const trades = [], ck = `${cfg.minP}|${cfg.edge}|${cfg.fee}`;
   for (const [ws, snaps] of byWin) {
     const out = outMap.get(ws);
     if (!out) continue;
+    // afgeronde vensters veranderen niet meer: resultaat per instelling onthouden
+    const mk = `${ck}|${ws}|${out.res}`;
+    if (memo && memo.has(mk)) { const t = memo.get(mk); if (t) trades.push(t); continue; }
+    let trade = null;
     for (const sn of snaps) {
-      const r = adviseCore({ ...sn, secs: WM * 60 - sn.el }, cfg);
+      sn.secs = WM * 60 - sn.el;
+      const r = adviseCore(sn, cfg);
       if (!r.buy) continue;
       const eff = r.cost + cfg.fee, win = out.res === r.side;
-      trades.push({ ws, side: r.side, price: r.cost, el: sn.el, pHat: r.pHat, win, pnl: win ? 1 / eff - 1 : -1 });
+      trade = { ws, side: r.side, price: r.cost, el: sn.el, pHat: r.pHat, win, pnl: win ? 1 / eff - 1 : -1 };
       break;
     }
+    if (memo) memo.set(mk, trade);
+    if (trade) trades.push(trade);
   }
   const n = trades.length, wins = trades.filter(t => t.win).length;
   const total = trades.reduce((s, t) => s + t.pnl, 0);
@@ -2760,15 +2842,34 @@ function simulate(byWin, outMap, cfg) {
   return { trades, n, wins, total, roi: n ? total / n : null, dd };
 }
 
-async function runBacktest() {
-  const tf = TF.key, gen = S.gen;
-  const { snaps, outs } = await loadRecordings(tf);
-  if (gen !== S.gen) return;
+function groupSnaps(snaps) {
   const byWin = new Map();
   for (const sn of snaps.sort((a, b) => a.t - b.t)) {
     if (!byWin.has(sn.ws)) byWin.set(sn.ws, []);
     byWin.get(sn.ws).push(sn);
   }
+  return byWin;
+}
+
+// full = alles opnieuw uit de opslag lezen; anders alleen de nieuwste vensters (scheelt veel bij weken aan opnames)
+async function runBacktest(full) {
+  const tf = TF.key, gen = S.gen;
+  let C = S.rec.cache;
+  if (full || !C || C.tf !== tf) {
+    const { snaps, outs } = await loadRecordings(tf);
+    if (gen !== S.gen) return;
+    C = S.rec.cache = { tf, byWin: groupSnaps(snaps), outs, memo: new Map() };
+  } else {
+    let lastWs = 0;
+    for (const ws of C.byWin.keys()) if (ws > lastWs) lastWs = ws;
+    const snaps = await idbReq('snaps', 'readonly', st => st.index('tfws').getAll(IDBKeyRange.bound([tf, lastWs], [tf, Number.MAX_SAFE_INTEGER]))) || [];
+    const outs = await idbReq('outcomes', 'readonly', st => st.getAll(IDBKeyRange.bound([tf, 0], [tf, Number.MAX_SAFE_INTEGER]))) || [];
+    if (gen !== S.gen || S.rec.cache !== C) return;
+    for (const [ws, list] of groupSnaps(snaps)) C.byWin.set(ws, list);
+    C.outs = outs;
+    if (C.memo.size > 300000) C.memo.clear();
+  }
+  const byWin = C.byWin, outs = C.outs, snapsCount = [...byWin.values()].reduce((n, l) => n + l.length, 0);
   const outMap = new Map(outs.map(o => [o.ws, o]));
   // vensters zonder vastgelegde uitslag (pagina was dicht): Binance-candles als vangnet
   for (const ws of byWin.keys()) {
@@ -2776,7 +2877,7 @@ async function runBacktest() {
     const b = binanceOutcome(ws);
     if (b) outMap.set(ws, { ws, ...b, src: b.src + ' (vangnet)' });
   }
-  const main = simulate(byWin, outMap, S.cfg);
+  const main = simulate(byWin, outMap, S.cfg, C.memo);
   // markt vs. model: wie schatte de kans op UP beter in? (Brier-score, lager is beter)
   let bm = 0, bp = 0, nb = 0;
   for (const [ws, list] of byWin) {
@@ -2790,10 +2891,10 @@ async function runBacktest() {
   }
   const grid = [];
   for (const minP of [0.6, 0.7, 0.8, 0.9]) for (const edge of [0.02, 0.04, 0.08]) {
-    const r = simulate(byWin, outMap, { ...S.cfg, minP, edge });
+    const r = simulate(byWin, outMap, { ...S.cfg, minP, edge }, C.memo);
     grid.push({ minP, edge, n: r.n, roi: r.roi });
   }
-  S.rec.bt = { windows: byWin.size, resolved: [...byWin.keys()].filter(ws => outMap.has(ws)).length, snaps: snaps.length, main, grid,
+  S.rec.bt = { windows: byWin.size, resolved: [...byWin.keys()].filter(ws => outMap.has(ws)).length, snaps: snapsCount, main, grid,
     market: nb ? { n: nb, model: bp / nb, market: bm / nb } : null,
     srcs: [...byWin.keys()].map(ws => outMap.get(ws)).filter(Boolean).reduce((m, o) => (m[o.src] = (m[o.src] || 0) + 1, m), {}) };
   renderBacktest();
@@ -2876,8 +2977,8 @@ async function clearRecordings() {
   const keys = await idbReq('snaps', 'readonly', st => st.index('tfws').getAllKeys(range)) || [];
   await idbReq('snaps', 'readwrite', st => { for (const k of keys) st.delete(k); });
   await idbReq('outcomes', 'readwrite', st => st.delete(range));
-  S.rec.bt = null; S.rec.pending.clear();
-  runBacktest();
+  S.rec.bt = null; S.rec.pending.clear(); S.rec.cache = null;
+  runBacktest(true);
 }
 
 // ---------- Tijdsframe wisselen ----------
@@ -2933,7 +3034,7 @@ function onNewWindow(ws) {
   if (!first) {
     $('openInput').value = '';
     rebuildSamples(); renderCalib(); renderEntry();
-    if (ws % (60 * MIN) === 0) retrain();     // elk heel uur opnieuw leren
+    if (ws % (60 * MIN) === 0) { retrain(); saveCandleCache(true); }     // elk heel uur opnieuw leren + cache bijwerken
   }
   loadPolymarket(ws);
 }
@@ -2957,6 +3058,47 @@ function tick() {
   trackTick(now, a);
 }
 
+// Statuspaneel: werkt elke databron? Met een korte uitleg als iets niet werkt.
+function renderStatus() {
+  const now = Date.now(), ago = t => t ? `${Math.max(0, Math.round((now - t) / 1000))} s geleden` : 'nog niets ontvangen';
+  const rows = [];
+  const add = (ok, name, txt, hint) => rows.push({ ok, name, txt, hint });
+  const live = now - S.lastMsg < 10000;
+  add(live ? 'live' : S.priceT && now - S.priceT < 12000 ? 'warn' : 'err', 'Binance live koers',
+    live ? `OK, laatste bericht ${ago(S.lastMsg)}` : S.priceT && now - S.priceT < 12000 ? 'live stream weg, koers via REST (elke 5 s)' : 'geen verbinding',
+    live ? '' : 'Probeer de pagina te herladen. Werkt het niet: controleer internet, VPN, firewall of adblocker.');
+  add(S.binErr ? 'err' : 'live', 'Binance candles', S.binErr ? `fout: ${S.binErr}` : `OK${S.binOkAt ? `, ${ago(S.binOkAt)}` : ''}`, '');
+  const h = S.hist;
+  add(h.error ? 'err' : h.loading || h.busy ? 'warn' : h.candles.length ? 'live' : 'warn', 'Historie (voor modellen en patronen)',
+    h.error ? `fout: ${h.error}` : h.loading || h.busy ? `laden… ${h.pct || 0}%` : h.candles.length ? `OK, ${Math.round((now - h.candles[0].t) / DAY)} dagen in geheugen` : 'nog niet geladen',
+    h.error ? `Nieuwe poging over ${Math.max(0, Math.round(((h.retryAt || now) - now) / 1000))} s.` : '');
+  if (TF.src === 'chainlink') {
+    const src = (k, name, hint) => { const st = S.src[k]; const ok = st.ticks.length && now - st.last < 15000; add(ok ? 'live' : 'err', name, ok ? `OK, ${ago(st.last)}` : st.last ? `stil sinds ${ago(st.last)}` : 'niet beschikbaar', ok ? '' : hint); };
+    src('cl', 'Chainlink-prijs (via Polymarket)', 'Zonder Chainlink schat de pagina de afrekenprijs via Coinbase of Binance (minder precies).');
+    src('tw', 'Chainlink 60s-gemiddelde (via Polymarket)', 'Niet erg: de pagina rekent het gemiddelde dan zelf uit.');
+    src('cb', 'Coinbase-koers', 'Alleen nodig als Chainlink niet werkt.');
+  }
+  const pm = S.pm;
+  if (pm) {
+    const fresh = pm.updated && now - pm.updated < 15000;
+    add(pm.status === 'fout' ? 'err' : fresh ? 'live' : 'warn', 'Polymarket-markt en prijzen',
+      pm.status === 'fout' ? `markt niet gevonden: ${pm.err}` : pm.status === 'laden' ? 'zoeken…' : fresh ? `OK, prijzen ${ago(pm.updated)}` : `markt gevonden, prijzen niet actueel${pm.bookErr ? ` (${pm.bookErr})` : ''}`,
+      pm.status === 'fout' ? 'Plak de link van de markt bij "Polymarket vergelijking", of vul de prijzen zelf in.' : '');
+  }
+  add(S.rec.error ? 'err' : 'live', 'Opslag in deze browser', S.rec.error ? `werkt niet: ${S.rec.error}` : 'OK', S.rec.error ? 'Gebruik Chrome of Edge en geen privévenster.' : '');
+  if (S.clockOff) add('warn', 'Computerklok', `loopt ${Math.abs(S.clockOff / 1000).toFixed(1)} s ${S.clockOff > 0 ? 'achter' : 'voor'} — gecorrigeerd`, 'Zet "tijd automatisch instellen" aan in Windows.');
+  $('statusList').innerHTML = rows.map(r => `<div class="srow"><span class="dot ${r.ok}"></span><span><b></b> <span class="st"></span>${r.hint ? '<br><span class="muted hint"></span>' : ''}</span></div>`).join('');
+  [...$('statusList').children].forEach((el, i) => {
+    el.querySelector('b').textContent = rows[i].name + ':';
+    el.querySelector('.st').textContent = rows[i].txt;
+    const hh = el.querySelector('.hint'); if (hh) hh.textContent = rows[i].hint;
+  });
+  // samenvatting in het bolletje: rood als iets belangrijks stuk is
+  const bad = rows.filter(r => r.ok === 'err').length;
+  if (bad && live) setConn('warn', `Live · ${bad} bron${bad > 1 ? 'nen' : ''} met problemen`);
+  else if (!bad && live) setConn('live', 'Live — alle bronnen OK');
+}
+
 function slowTick() {
   const now = nowMs();
   pruneTrades(now);
@@ -2965,6 +3107,7 @@ function slowTick() {
   if (S.hist.error && !S.hist.loading && !S.hist.busy && Date.now() > (S.hist.retryAt || 0)) ensureHistory();
   resolveTrack(now);
   resolveRecordings(now);
+  renderStatus();
   renderPatternsLive();
   renderRecent(now);
   renderTrack();
@@ -2978,12 +3121,36 @@ function wireUi() {
   $('openSet').onclick = setOpen;
   $('openInput').addEventListener('keydown', e => { if (e.key === 'Enter') setOpen(); });
   $('openReset').onclick = () => { delete S.manualOpen[winStart(Date.now())]; $('openInput').value = ''; };
-  const setManual = side => e => { const v = parseCents(e.target.value); S.manualPm[side] = v == null ? null : { v, t: Date.now() }; };
+  const timers = {};
+  const setManual = side => e => {
+    clearTimeout(timers[side]);
+    const val = e.target.value;
+    S.manualPm[side] = null;
+    timers[side] = setTimeout(() => { const v = parseCents(val); S.manualPm[side] = v == null ? null : { v, t: Date.now() }; }, 700);
+  };
   $('pmUpIn').addEventListener('input', setManual('up'));
   $('pmDownIn').addEventListener('input', setManual('down'));
   $('trackClear').onclick = () => { if (confirm('Track record in deze browser wissen?')) { S.track = []; trSave(); renderTrack(); $('trackSum').textContent = 'Gewist.'; } };
   // tijdsframe-tabs
   for (const b of $('tfTabs').children) b.onclick = () => setTF(b.dataset.tf);
+  // Eenvoudig / Alles
+  let view = 'simple';
+  try { view = localStorage.getItem('btc.view.v1') || 'simple'; } catch {}
+  const setView = v => {
+    view = v;
+    document.body.classList.toggle('simple', v === 'simple');
+    for (const b of $('viewTabs').children) { const on = b.dataset.view === v; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); }
+    try { localStorage.setItem('btc.view.v1', v); } catch {}
+  };
+  for (const b of $('viewTabs').children) b.onclick = () => setView(b.dataset.view);
+  setView(view);
+  // Polymarket-link plakken
+  $('pmLinkSet').onclick = () => {
+    const m = String($('pmLinkIn').value).match(/\/event\/([a-z0-9-]+)/i) || String($('pmLinkIn').value).trim().match(/^([a-z0-9-]{8,})$/i);
+    if (!m || S.curWs == null) { $('pmLinkIn').value = ''; $('pmLinkIn').placeholder = 'Dat lijkt geen Polymarket-link — kopieer de link uit je browser'; return; }
+    S.pmForced = { ws: S.curWs, tf: TF.key, slug: m[1].toLowerCase() };
+    loadPolymarket(S.curWs);
+  };
   window.addEventListener('hashchange', () => { const k = location.hash.slice(1); if (TIMEFRAMES[k]) setTF(k); });
   // instellingen koopadvies (in procenten/punten ingevuld, intern als fractie)
   const fields = [['setMinP', 'minP', 50, 99], ['setEdge', 'edge', 0, 30], ['setFee', 'fee', 0, 20]];
@@ -3016,7 +3183,7 @@ function wireUi() {
     }
   });
   // terugtest
-  $('btRun').onclick = () => runBacktest();
+  $('btRun').onclick = () => runBacktest(true);
   $('btExport').onclick = () => exportRecordings();
   $('btClear').onclick = () => clearRecordings();
   // bij gewijzigde instellingen de terugtest opnieuw tonen
@@ -3039,6 +3206,7 @@ async function init() {
   wireUi();
   setConn('warn', 'Data laden…');
   tick();                                   // venster en aftelling meteen tonen
+  ensureHistory();                          // historie al laden terwijl de rest opstart
   if (await refreshKlines(400)) setConn('warn', 'Verbinden met live stream…');
   connectWs();
   connectCoinbase();
@@ -3067,7 +3235,6 @@ async function init() {
   }
   window.addEventListener('online', () => resync());
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - S.lastMsg > 20000) resync(); });
-  ensureHistory();
 }
 
 init();
