@@ -247,6 +247,7 @@ td.wrap { white-space: normal; text-align: left; }
       <span class="muted">Zelf invullen (¢):</span>
       <input id="pmUpIn" type="text" inputmode="decimal" placeholder="UP bijv. 55" style="width:96px">
       <input id="pmDownIn" type="text" inputmode="decimal" placeholder="DOWN bijv. 47" style="width:96px">
+      <span id="pmManAge" class="muted"></span>
     </div>
     <div id="edge" class="edge small">–</div>
   </section>
@@ -558,9 +559,19 @@ async function fetchJson(url, timeout = 8000) {
   const ctl = new AbortController();
   const id = setTimeout(() => ctl.abort(), timeout);
   try {
-    const r = await fetch(url, { signal: ctl.signal });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return await r.json();
+    let r;
+    try { r = await fetch(url, { signal: ctl.signal }); }
+    catch (e) {
+      if (e.name === 'AbortError') throw new Error(`geen antwoord binnen ${timeout / 1000} s (trage of haperende verbinding)`);
+      throw new Error(navigator.onLine === false ? 'geen internetverbinding' : 'server niet bereikbaar (internet, firewall, adblocker of virusscanner blokkeert de verbinding)');
+    }
+    if (!r.ok) {
+      const st = r.status;
+      throw new Error(st === 451 || st === 403 ? `geblokkeerd voor jouw land of netwerk (HTTP ${st})`
+        : st === 429 || st === 418 ? `te veel verzoeken — even wachten (HTTP ${st})`
+        : st >= 500 ? `storing bij de server (HTTP ${st})` : `HTTP ${st}`);
+    }
+    try { return await r.json(); } catch { throw new Error('onleesbaar antwoord van de server'); }
   } finally { clearTimeout(id); }
 }
 
@@ -608,11 +619,12 @@ async function refreshKlines(limit = 400) {
 function connectWs() {
   const base = WS_BASES[S.wsIdx % WS_BASES.length];
   const s = SYMBOL.toLowerCase();
-  let ws;
+  let ws, opened = false;
   try { ws = new WebSocket(`${base}/stream?streams=${s}@aggTrade/${s}@kline_1m/${s}@depth20@100ms`); }
-  catch (e) { scheduleReconnect(); return; }
+  catch (e) { scheduleReconnect(true); return; }
   S.ws = ws;
   ws.onopen = () => {
+    opened = true;
     S.wsFails = 0;
     S.lastMsg = Date.now();
     setConn('live', 'Live (Binance)');
@@ -631,20 +643,36 @@ function connectWs() {
     if (S.ws !== ws) return;
     S.ws = null;
     setConn('warn', 'Verbinding weg — opnieuw verbinden…');
-    scheduleReconnect();
+    scheduleReconnect(!opened);          // alleen naar de andere server als deze nooit werkte
   };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
-function scheduleReconnect() {
-  S.wsFails++; S.wsIdx++;
+function scheduleReconnect(rotate = true) {
+  S.wsFails++;
+  if (rotate) S.wsIdx++;
   clearTimeout(S.reconnectTimer);
   S.reconnectTimer = setTimeout(connectWs, Math.min(30000, 1000 * 2 ** Math.min(S.wsFails, 5)));
 }
 
+// Loopt de computerklok voor of achter? Mediaan van (servertijd − eigen tijd) over recente trades.
+const nowMs = () => Date.now() + (S.clockOff || 0);
+function trackClock(serverT) {
+  if (!serverT) return;
+  const off = S.clockSamples || (S.clockSamples = []);
+  off.push(serverT - Date.now());
+  if (off.length > 101) off.shift();
+  if (off.length >= 21 && off.length % 10 === 1) {
+    const sorted = off.slice().sort((x, y) => x - y);
+    const med = sorted[sorted.length >> 1];
+    S.clockOff = Math.abs(med) > 1000 ? med : 0;      // kleine verschillen (netwerkvertraging) negeren
+  }
+}
+
 function onTrade(d) {
+  trackClock(d.E);
   const t = { t: d.T, p: +d.p, q: +d.q, buy: !d.m };   // m = koper is maker -> agressieve verkoper
-  S.price = t.p;
+  S.price = t.p; S.priceT = Date.now();
   S.trades.push(t);
   const w = winStart(t.t);
   if (!S.winFirstTrade || S.winFirstTrade.ws !== w) S.winFirstTrade = { ws: w, t: t.t, p: t.p };
@@ -686,17 +714,30 @@ function pruneTrades(now) {
   if (i) S.trades.splice(0, i);
 }
 
+// Een verbinding direct loslaten (een dode verbinding meldt zich soms pas na een minuut af)
+function dropWs() {
+  const old = S.ws;
+  S.ws = null;
+  if (old) { old.onclose = old.onmessage = old.onerror = null; try { old.close(); } catch {} }
+}
+function dropSrc(k) {
+  const st = S.src[k], old = st.ws;
+  st.ws = null; clearInterval(st.ping); clearTimeout(st.timer);
+  if (old) { old.onclose = old.onmessage = old.onerror = null; try { old.close(); } catch {} }
+}
+const reconnectSrc = k => { dropSrc(k); S.src[k].fails = 0; (k === 'cb' ? connectCoinbase : connectRtds)(); };
+
 async function watchdog() {
-  // Coinbase/RTDS: open maar al 30 s stil? Opnieuw verbinden.
+  // Coinbase/RTDS: open maar al 30 s stil? Meteen opnieuw verbinden.
   for (const [k, last] of [['cb', S.src.cb.last], ['cl', Math.max(S.src.cl.last, S.src.tw.last)]]) {
     const st = S.src[k];
-    if (st.ws && st.ws.readyState === 1 && Date.now() - Math.max(last || 0, st.opened || 0) > 30000) { try { st.ws.close(); } catch {} }
+    if (st.ws && st.ws.readyState === 1 && Date.now() - Math.max(last || 0, st.opened || 0) > 30000) reconnectSrc(k);
   }
   const silent = Date.now() - S.lastMsg;
-  if (S.ws && S.ws.readyState === WebSocket.OPEN && silent > 15000) { try { S.ws.close(); } catch {} }
+  if (S.ws && S.ws.readyState === WebSocket.OPEN && silent > 15000) { dropWs(); S.wsFails = 0; scheduleReconnect(false); }
   if (silent > 10000) {                       // geen live data: val terug op REST
     if (await refreshKlines(5)) {
-      try { S.price = +(await binance(`/api/v3/ticker/price?symbol=${SYMBOL}`)).price; } catch {}
+      try { S.price = +(await binance(`/api/v3/ticker/price?symbol=${SYMBOL}`)).price; S.priceT = Date.now(); } catch {}
       if (Date.now() - S.lastMsg > 10000) setConn('warn', 'Geen live stream — data via REST (elke 5 s)');
     }
   }
@@ -737,30 +778,66 @@ async function loadHistory() {
       if (!batch.length) break;
       older.unshift(...batch);
       end = batch[0].t - 1;
-      const pct = Math.min(100, Math.round((covered() + older.length * MIN) / needMs() * 100));
+      const pct = S.hist.pct = Math.min(100, Math.round((covered() + older.length * MIN) / needMs() * 100));
       $('calibSum').textContent = `Historie laden (${TF.histDays} dagen)… ${pct}%`;
       $('entryTbl').innerHTML = `<tr><td colspan="5" class="muted">Historie laden… ${pct}%</td></tr>`;
     }
-    const now = Date.now();
-    if (first) {
-      // kaarsen die tijdens het laden sloten (en de toen nog lopende laatste kaars) samenvoegen
-      const m = new Map(older.filter(c => c.t + MIN <= now).map(c => [c.t, c]));
-      for (const c of S.hist.pending || []) m.set(c.t, c);
-      for (const c of S.klines) if (c.t + MIN <= now && m.size && c.t >= older[0].t) m.set(c.t, c);
-      S.hist.candles = [...m.values()].sort((a, b) => a.t - b.t);
-      S.hist.pending = [];
-    }
-    else {
-      const firstT = S.hist.candles[0].t;
-      S.hist.candles = older.filter(c => c.t < firstT).concat(S.hist.candles);
-    }
+    mergeOlder(first, older);
+    S.hist.fails = 0;
   } catch (e) {
+    mergeOlder(first, older);              // wat al binnen is bewaren; de volgende poging gaat verder
     S.hist.error = e.message;
-    $('calibSum').textContent = 'Historie kon niet geladen worden (' + e.message + '). Wordt bij het volgende venster opnieuw geprobeerd.';
+    S.hist.fails = (S.hist.fails || 0) + 1;
+    S.hist.retryAt = Date.now() + Math.min(300000, 15000 * 2 ** (S.hist.fails - 1));
+    $('calibSum').textContent = `Historie kon niet (helemaal) geladen worden: ${e.message}. Nieuwe poging over ${Math.round((S.hist.retryAt - Date.now()) / 1000)} s.`;
   } finally {
     S.hist.loading = false;
     S.hist.busy = false;
   }
+}
+
+function mergeOlder(first, older) {
+  if (!older.length) return;
+  const now = Date.now();
+  if (first) {
+    // kaarsen die tijdens het laden sloten (en de toen nog lopende laatste kaars) samenvoegen
+    const m = new Map(older.filter(c => c.t + MIN <= now).map(c => [c.t, c]));
+    for (const c of S.hist.pending || []) m.set(c.t, c);
+    for (const c of S.klines) if (c.t + MIN <= now && m.size && c.t >= older[0].t) m.set(c.t, c);
+    S.hist.candles = [...m.values()].sort((a, b) => a.t - b.t);
+    S.hist.pending = [];
+  } else {
+    const firstT = S.hist.candles[0].t;
+    S.hist.candles = older.filter(c => c.t < firstT).concat(S.hist.candles);
+  }
+}
+
+// Gat aan het einde van de historie opvullen (na slaapstand of een storing)
+async function backfillHistTail() {
+  const h = S.hist.candles;
+  if (!h.length || S.hist.loading) return;
+  let from = h[h.length - 1].t + MIN;
+  for (let i = 0; i < 12 && from + MIN <= Date.now(); i++) {
+    const n = Math.min(1000, Math.ceil((Date.now() - from) / MIN) + 1);
+    const batch = await getKlines(n, Math.min(Date.now(), from + n * MIN));
+    const add = batch.filter(c => c.t >= from && c.t + MIN <= Date.now());
+    if (!add.length) break;
+    for (const c of add) appendHist(c);
+    from = add[add.length - 1].t + MIN;
+  }
+}
+
+// Na slaapstand, een storing of als internet terugkomt: alles meteen opnieuw ophalen
+async function resync() {
+  if (S.resyncing) return;
+  S.resyncing = true;
+  try {
+    dropWs(); S.wsFails = 0; clearTimeout(S.reconnectTimer); connectWs();
+    reconnectSrc('cb'); reconnectSrc('cl');
+    await refreshKlines(400);
+    if (S.hist.error) ensureHistory(); else await backfillHistTail().catch(() => {});
+    if (S.curWs != null) loadPolymarket(S.curWs);
+  } finally { S.resyncing = false; }
 }
 
 // Alleen de historie die bij het tijdsframe hoort (na een uitstapje naar 1 uur staat er meer in het geheugen)
@@ -1408,18 +1485,23 @@ async function pollPolymarketBook() {
     pm.up = bookTop(bu, pm.up);
     pm.down = bookTop(bd, pm.down);
     pm.updated = Date.now();
+    pm.bookErr = null;
     recordSnap();
   } catch (e) { pm.bookErr = e.message; }
 }
 
 // Wat kost het om UP / DOWN te kopen? Eigen invoer gaat voor.
+const MANUAL_TTL = () => (TF.key === '1h' ? 60000 : 30000);
+function manualPrice(side) {
+  const m = S.manualPm[side];
+  return m && Date.now() - m.t < MANUAL_TTL() ? m.v : null;
+}
 function pmCost(side) {
-  if (S.manualPm[side] != null) return S.manualPm[side];
+  // 1) een recente, echte vraagprijs van Polymarket gaat altijd voor
   const pm = S.pm;
-  if (!pm || pm.ws !== S.curWs || pm.gen !== S.gen || !pm[side]) return null;
-  // alleen een recente, echte vraagprijs: een oude of geschatte prijs kun je niet kopen
-  if (!pm.updated || Date.now() - pm.updated > 15000) return null;
-  return pm[side].ask ?? null;
+  if (pm && pm.ws === S.curWs && pm.gen === S.gen && pm[side] && pm.updated && Date.now() - pm.updated < 15000 && pm[side].ask != null) return pm[side].ask;
+  // 2) anders een zelf ingevulde prijs, maar alleen zolang die vers is (prijzen veranderen snel)
+  return manualPrice(side);
 }
 
 // ---------- Extra prijsbronnen: Coinbase en Chainlink (via Polymarket RTDS) ----------
@@ -1542,7 +1624,17 @@ const binanceTicks = () => S.trades;
 
 // ---------- Analyse ----------
 // Price to beat. feed = welke bron de open levert: 'man', 'pm', 'tw', 'cl' (Chainlink-familie), 'cb' of 'bn'.
+const FEED_RANK = { bn: 0, cb: 1, cl: 2, tw: 3, pm: 4, man: 5 };
 function currentOpen(ws) {
+  const op = currentOpenRaw(ws);
+  if (!op || TF.src === 'binance' || op.feed === 'man') return op;
+  const memo = S.openMemo || (S.openMemo = {}), key = `${TF.key}|${ws}`, prev = memo[key];
+  if (prev && FEED_RANK[prev.feed] >= FEED_RANK[op.feed]) return prev;
+  memo[key] = op;
+  return op;
+}
+
+function currentOpenRaw(ws) {
   if (S.manualOpen[ws] != null) return { px: S.manualOpen[ws], src: 'handmatig ingevuld', feed: 'man' };
   const k = S.klines.find(c => c.t === ws);
   const binOpen = k ? k.o : (S.winFirstTrade && S.winFirstTrade.ws === ws && S.winFirstTrade.t - ws < 5000 ? S.winFirstTrade.p : null);
@@ -1573,25 +1665,52 @@ function currentOpen(ws) {
 function settleState(op, now, we) {
   const T = Math.max((we - now) / MIN, 0);
   if (TF.src === 'binance') return { spot: S.price, E: S.price, V: Math.max(T, 1 / 3600), spotSrc: 'Binance' };
-  // spotbron die past bij de bron van de open (geen appels met peren vergelijken)
+  // spotbron die past bij de bron van de open (geen appels met peren vergelijken).
+  // Eén regel voor "vers": laatste bericht < 5 s geleden — dan kloppen bron, getal en waarschuwing altijd met elkaar.
+  const recent = k => S.src[k].ticks.length && Date.now() - S.src[k].last < 5000;
   let buf, key = 'v', spotSrc;
-  if (op.feed !== 'bn' && op.feed !== 'cb' && srcFresh('cl')) { buf = S.src.cl.ticks; spotSrc = 'Chainlink'; }
-  else if (op.feed !== 'bn' && srcFresh('cb')) { buf = S.src.cb.ticks; spotSrc = 'Coinbase'; }
+  if (op.feed !== 'bn' && op.feed !== 'cb' && recent('cl')) { buf = S.src.cl.ticks; spotSrc = 'Chainlink'; }
+  else if (op.feed !== 'bn' && recent('cb')) { buf = S.src.cb.ticks; spotSrc = 'Coinbase'; }
   else { buf = binanceTicks(); key = 'p'; spotSrc = 'Binance'; }
   const lt = buf[buf.length - 1];
-  const fresh = lt && Date.now() - (key === 'p' ? lt.t : S.src[spotSrc === 'Chainlink' ? 'cl' : 'cb'].last) < 5000;
-  const spot = fresh ? lt[key] : S.price;
+  const fresh = key === 'v' || (lt && nowMs() - lt.t < 5000);
+  let spot = fresh && lt ? lt[key] : S.price;
+  // Chainlink-open maar Coinbase/Binance-spot: corrigeer voor het prijsverschil tussen de beurzen,
+  // gemeten in de minuut vóór de start (daar is ook de price to beat over gemiddeld)
+  let shift = 0;
+  if (['pm', 'tw', 'cl', 'man'].includes(op.feed) && spotSrc !== 'Chainlink') {
+    const ref = startRef(we - WIN, spotSrc);
+    if (ref) shift = op.px - ref;
+  }
+  spot += shift;
   let E = spot, V;
   if (T >= 1) V = T - 2 / 3;
   else {
-    const known = fresh ? avgTicks(buf, we - TWAP_MS, now, key) : null;   // deel van de eindminuut dat al voorbij is
+    const k0 = fresh ? avgTicks(buf, we - TWAP_MS, now, key) : null;   // deel van de eindminuut dat al voorbij is
+    const known = k0 != null ? k0 + shift : null;
     const s = 1 - T;
     if (known) { E = s * known + T * spot; V = Math.max(T ** 3 / 3, 1 / 3600); }
     else V = 1 / 3;                                   // onbekend: rekenen alsof de hele eindminuut nog open ligt
   }
   // open is alleen geschat (Binance): extra onzekerheid voor het verschil met de echte price to beat
   if (op.feed === 'bn') V += 1 / 3;
-  return { spot, E, V, spotSrc };
+  if (shift) V += 1 / 12;                              // het prijsverschil tussen beurzen schommelt een beetje
+  return { spot, E, V, spotSrc: spotSrc + (shift ? ' (gecorrigeerd)' : '') };
+}
+
+// Gemiddelde prijs van een bron in de minuut vóór de start (onthouden per venster; de buffers zijn kort)
+function startRef(ws, src) {
+  const key = `${TF.key}|${ws}|${src}`, memo = S.refMemo || (S.refMemo = {});
+  if (memo[key] != null) return memo[key];
+  let v = null;
+  if (src === 'Coinbase') v = avgTicks(S.src.cb.ticks, ws - TWAP_MS, ws);
+  else {
+    v = avgTicks(S.trades, ws - TWAP_MS, ws, 'p');
+    const k = !v && S.klines.find(c => c.t === ws - MIN);
+    if (k) v = (k.o + k.h + k.l + k.c) / 4;
+  }
+  if (v) memo[key] = v;
+  return v;
 }
 
 // Uitslag van een afgelopen venster: bij Chainlink-markten liefst met Chainlink-data, anders Binance-candles
@@ -1676,9 +1795,14 @@ function computeSignals(now) {
 function analyze(now) {
   const ws = winStart(now), we = ws + WIN;
   const a = { ws, we, minsLeft: (we - now) / MIN, sg: computeSignals(now), op: currentOpen(ws) };
+  // geen verse Binance-prijs (verbinding weg, laptop uit slaapstand): geen advies op oude data
+  a.staleSec = S.priceT ? Math.round((Date.now() - S.priceT) / 1000) : null;
+  a.stale = a.staleSec == null || a.staleSec > 10;
   // Vooraf-voorspelling: geleerd model als dat klaar is, anders de vuistregel
-  a.next = prePredict(we);
-  a.pNext = a.next ? a.next.p : a.sg ? Phi(NEXT_K * a.sg.score) : null;
+  a.nextReady = a.minsLeft <= 1;                 // het vooraf-model is getraind op de laatste minuut vóór de start
+  a.next = a.nextReady ? prePredict(we) : null;
+  const br = baseRate();
+  a.pNext = a.next ? a.next.p : a.nextReady && a.sg ? Phi(NEXT_K * a.sg.score) : br ? br.p : null;
   if (now - ws < 30000) { const cur = prePredict(ws); a.pPre = cur && cur.p; }
   if (!a.sg || !a.op) return a;
   // z: verwachte afrekenprijs t.o.v. de price to beat, gedeeld door de resterende onzekerheid
@@ -1743,9 +1867,10 @@ function resolveTrack(now) {
 }
 
 // ---------- Weergave ----------
-function renderHero(a, now) {
+function renderHero(a, now, adv) {
   $('winLabel').textContent = `${fmtTime(a.ws)} – ${fmtTime(a.we)}`;
-  $('winEt').textContent = `Polymarket (ET): ${fmtEt(a.ws)} – ${fmtEt(a.we)}`;
+  const skew = S.clockOff ? ` · let op: je computerklok loopt ${Math.abs(S.clockOff / 1000).toFixed(1)} s ${S.clockOff > 0 ? 'achter' : 'voor'} (hier gecorrigeerd)` : '';
+  $('winEt').textContent = `Polymarket (ET): ${fmtEt(a.ws)} – ${fmtEt(a.we)}${skew}`;
   $('countdown').textContent = fmtCountdown(a.we - now);
   $('progress').style.width = clamp((now - a.ws) / WIN * 100, 0, 100) + '%';
 
@@ -1772,7 +1897,7 @@ function renderHero(a, now) {
     up.textContent = p >= 0.12 ? `UP ${fmtPct(p)}` : '';
     down.textContent = p <= 0.88 ? `${fmtPct(1 - p)} DOWN` : '';
   }
-  renderVerdict(a, price);
+  renderVerdict(a, price, adv);
 }
 
 // Chainlink-markten (5/15 min): vlak bij de open kan het verschil Binance ↔ Chainlink de uitslag bepalen
@@ -1780,35 +1905,53 @@ function renderHero(a, now) {
 function nearOpenUsd(a) {
   if (!a.op) return NEAR_OPEN_USD;
   const clFeed = ['man', 'pm', 'tw', 'cl'].includes(a.op.feed);
-  return clFeed && a.spotSrc === 'Chainlink' ? 5 : a.spotSrc === 'Coinbase' ? 15 : NEAR_OPEN_USD;
+  return clFeed && (a.spotSrc || '').startsWith('Chainlink') ? 5 : (a.spotSrc || '').startsWith('Coinbase') ? 15 : NEAR_OPEN_USD;
 }
 function nearOpenRisk(a) {
   return TF.src === 'chainlink' && a.E != null && !!a.op && Math.abs(a.E - a.op.px) < nearOpenUsd(a);
 }
 
-function renderVerdict(a, price) {
+function renderVerdict(a, price, adv) {
   const el = $('verdict');
-  if (a.pSig == null) { el.textContent = S.klines.length ? 'Wachten op de open van dit venster…' : 'Data laden…'; return; }
+  el.innerHTML = '';
+  // 1) het antwoord: kopen of niet (gelijk aan het koopadvies)
+  const answer = document.createElement('b');
+  answer.style.fontSize = '17px';
+  if (!adv || adv.noData) {
+    answer.textContent = adv ? `${adv.head} ${adv.text}` : 'Data laden…';
+    if (adv && adv.head === 'GEEN LIVE DATA') answer.className = 'warn-c';
+    el.appendChild(answer);
+    return;
+  }
+  if (adv.state.startsWith('buy')) {
+    answer.textContent = `KOOP ${adv.side} — betaal hooguit ${cents(adv.maxPrice)} (nu ${cents(adv.cost)})`;
+    answer.className = adv.side === 'UP' ? 'up-c' : 'down-c';
+  } else if (adv.state === 'almost') {
+    answer.textContent = `${adv.side} alleen kopen onder ${cents(adv.maxPrice)}` + (adv.cost != null ? ` (nu ${cents(adv.cost)} — te duur)` : ' (Polymarket-prijs onbekend)');
+    answer.className = 'warn-c';
+  } else {
+    const why = (adv.checks.find(c => !c.ok) || {}).why;
+    answer.textContent = 'NIET KOPEN' + (why ? ` — ${why}` : '');
+  }
+  el.appendChild(answer);
+  // 2) daaronder de kans (ter info)
   const p = a.pSig, d = Math.abs(p - 0.5), side = p >= 0.5 ? 'UP' : 'DOWN';
   let head;
-  if (d < 0.06) head = 'Geen duidelijke voorkeur — nu vrijwel een muntworp.';
-  else if (d < 0.15) head = `Lichte voorkeur voor ${side}.`;
-  else if (d < 0.3) head = `Duidelijke voorkeur voor ${side}.`;
-  else head = `Sterke voorkeur voor ${side}.`;
+  if (d < 0.06) head = 'Kans volgens model: vrijwel een muntworp';
+  else head = `Kans volgens model: ${fmtPct(Math.max(p, 1 - p), 0)} ${side} (${d < 0.15 ? 'lichte' : d < 0.3 ? 'duidelijke' : 'sterke'} voorkeur)`;
   const notes = [];
   if (a.minsLeft > WM * 2 / 3) notes.push('Nog veel tijd over: de kans kan snel omslaan.');
   const sg = a.sg;
   if (Math.abs(sg.score) > 0.35 && Math.sign(sg.score) !== Math.sign(a.z) && Math.abs(a.z) > 0.2) {
     notes.push(`Let op: de prijs staat ${a.z > 0 ? 'boven' : 'onder'} de open, maar de order flow/signalen wijzen de andere kant op.`);
   }
-  el.innerHTML = '';
-  const b = document.createElement('b'); b.textContent = head;
-  b.className = d < 0.06 ? '' : side === 'UP' ? 'up-c' : 'down-c';
+  const b = document.createElement('div'); b.textContent = head;
+  b.className = 'small ' + (d < 0.06 ? 'muted' : side === 'UP' ? 'up-c' : 'down-c');
   el.appendChild(b);
   for (const n of notes) { const div = document.createElement('div'); div.className = 'small muted'; div.textContent = n; el.appendChild(div); }
   if (nearOpenRisk(a)) {
     const w = document.createElement('div'); w.className = 'warnline small';
-    w.textContent = a.spotSrc === 'Chainlink'
+    w.textContent = (a.spotSrc || '').startsWith('Chainlink')
       ? `Verwachte afrekenprijs ligt minder dan $${nearOpenUsd(a)} van de price to beat — dit kan nog alle kanten op.`
       : srcFresh('cl')
         ? `Prijs ligt minder dan $${nearOpenUsd(a)} van de open, en de price to beat is een schatting (${a.op.src}). Vul de echte price to beat van Polymarket in.`
@@ -1837,19 +1980,33 @@ function renderBreakdown(a) {
 
 function renderPM(a) {
   const pm = S.pm, st = $('pmStatus');
-  st.textContent = '';
+  st.textContent = ''; st.className = 'small muted';
   if (!pm || pm.status === 'laden') st.textContent = 'Polymarket-markt zoeken…';
   else if (pm.status === 'fout') st.textContent = `Polymarket automatisch ophalen lukte niet (${pm.err}). Vul de prijzen hieronder zelf in.`;
   else {
     const link = document.createElement('a');
     link.href = pm.url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Open markt op Polymarket';
-    st.append(pm.updated ? `Live, bijgewerkt ${Math.round((Date.now() - pm.updated) / 1000)} s geleden · ` : 'Gevonden · ', link);
+    const age = pm.updated ? Math.round((Date.now() - pm.updated) / 1000) : null;
+    if (age != null && age < 15) st.append(`Live, bijgewerkt ${age} s geleden · `, link);
+    else {
+      st.append(`Markt gevonden, maar de live prijzen ophalen lukt nu niet (${pm.bookErr || 'geen antwoord'}). De prijzen hieronder zijn niet actueel — open de markt of vul ze zelf in. `, link);
+      st.className = 'small warn-c';
+    }
   }
   const fmtSide = s => s ? `${cents(s.bid)} / ${cents(s.ask)}` + (s.bid == null && s.ask == null ? ` (mid ${cents(s.mid)})` : '') : '–';
   const pmNow = pm && pm.ws === a.ws && pm.gen === S.gen;
   $('pmUp').textContent = pmNow ? fmtSide(pm.up) : '–';
   $('pmDown').textContent = pmNow ? fmtSide(pm.down) : '–';
 
+  // leeftijd van zelf ingevulde prijzen
+  const ages = ['up', 'down'].map(sd => S.manualPm[sd] ? Math.round((Date.now() - S.manualPm[sd].t) / 1000) : null).filter(x => x != null);
+  const ageEl = $('pmManAge');
+  if (!ages.length) ageEl.textContent = '';
+  else {
+    const old = Math.max(...ages), ttl = MANUAL_TTL() / 1000;
+    ageEl.textContent = old >= ttl ? 'verlopen — vul opnieuw in (prijzen veranderen snel)' : `ingevuld ${old} s geleden (geldig ${ttl} s)`;
+    ageEl.className = old >= ttl ? 'warn-c' : 'muted';
+  }
   const edgeEl = $('edge');
   const p = a.pSig, cu = pmCost('up'), cd = pmCost('down');
   if (p == null || (cu == null && cd == null)) { edgeEl.textContent = 'Zodra er een kans én een Polymarket-prijs is, zie je hier of UP of DOWN goedkoop of duur is.'; return; }
@@ -1916,11 +2073,13 @@ function renderIndicators(a) {
 function renderNext(a, now) {
   $('nextLabel').textContent = `${fmtTime(a.we)} – ${fmtTime(a.we + WIN)}`;
   $('nextStart').textContent = `Start over ${fmtCountdown(a.we - now)} · Polymarket (ET): ${fmtEt(a.we)} – ${fmtEt(a.we + WIN)}`;
+  if (!a.nextReady) $('nextWhy').innerHTML = '';
   $('pNext').textContent = fmtPct(a.pNext); setPbar('bNext', a.pNext);
   const br = baseRate();
   $('pBase').textContent = br ? fmtPct(br.p) : '–'; setPbar('bBase', br && br.p);
   const m = S.model;
-  $('nextSub').textContent = a.next ? 'geleerd model: chart + order flow' : (m && m.error ? 'model niet beschikbaar — vuistregel' : 'model wordt getraind… (vuistregel)');
+  $('nextSub').textContent = !a.nextReady ? 'voorspelling verschijnt in de laatste minuut vóór de start (nu: basisfrequentie)'
+    : a.next ? 'geleerd model: chart + order flow' : (m && m.error ? 'model niet beschikbaar — vuistregel' : 'model wordt getraind… (vuistregel)');
   const why = $('nextWhy');
   why.innerHTML = '';
   if (a.next) {
@@ -1934,6 +2093,7 @@ function renderNext(a, now) {
     }
   }
   const vEl = $('nextVerdict');
+  if (!a.nextReady) { vEl.textContent = `De voorspelling vooraf verschijnt ${fmtCountdown(Math.max(0, a.we - now - MIN))} vóór de start van het volgende venster, in de laatste minuut — op dat moment is het model getest.`; return; }
   if (!a.next || !m || !m.preVal) { vEl.textContent = 'Vóór de start is het vrijwel altijd ~50/50. Zodra het model getraind is, zie je hier of het vooraf iets voorspelt.'; return; }
   const useful = m.preVal.acc >= 0.52 && m.preVal.brier < m.preVal.brierBase;
   const p = a.next.p, side = p >= 0.5 ? 'UP' : 'DOWN';
@@ -2349,17 +2509,21 @@ function liveAdviceInput(a, now) {
 
 // Live koopadvies voor het huidige venster
 function computeAdvice(a, now) {
-  if (a.pSig == null || !a.sg) return { state: 'wait', head: 'Wachten…', text: S.klines.length ? 'Wachten op de open van dit venster.' : 'Data laden…', checks: [] };
+  if (a.stale && S.klines.length) return { state: 'wait', head: 'GEEN LIVE DATA', text: `Laatste prijs is ${a.staleSec ?? '?'} s oud — geen advies tot de verbinding terug is.`, checks: [], noData: true };
+  if (a.pSig == null || !a.sg) return { state: 'wait', head: 'Even geduld…', text: S.klines.length ? 'Wachten op de open van dit venster.' : 'Koersen laden…', checks: [], noData: true };
+  if ((S.hist.loading || S.hist.busy) && !S.analog) return { state: 'wait', head: 'Even geduld…', text: `Historie laden ${S.hist.pct || 0}% — het koopadvies volgt zo.`, checks: [], noData: true };
   const r = adviseCore(liveAdviceInput(a, now), S.cfg);
   const { side, pHat, an, cost, maxPrice, ok } = r;
   const checks = [
-    { ok: ok.p, text: `Slagingskans ${side} ${fmtPct(pHat, 0)} ≥ jouw minimum ${fmtPct(S.cfg.minP, 0)}` + (an != null ? ' (laagste van model en historie)' : '') },
-    { ok: ok.hist, text: an != null ? `Historie bevestigt: vergelijkbare momenten ${fmtPct(an, 0)} ${side}` : 'Historie: nog te weinig vergelijkbare momenten' },
-    { ok: ok.flow, text: `Order flow en chart-signalen niet tegen ${side} (score ${fmtSigned(r.score, 2)})` },
-    { ok: ok.sweep, text: ok.sweep ? 'Geen sweep tegen je richting in' : `Er was een sweep tegen ${side} in (zie Highs & lows)` },
+    { ok: ok.p, text: `Slagingskans ${side} ${fmtPct(pHat, 0)} ≥ jouw minimum ${fmtPct(S.cfg.minP, 0)}` + (an != null ? ' (laagste van model en historie)' : ''),
+      why: `de kans op ${side} is maar ${fmtPct(pHat, 0)}, lager dan jouw minimum van ${fmtPct(S.cfg.minP, 0)}` },
+    { ok: ok.hist, text: an != null ? `Historie bevestigt: vergelijkbare momenten ${fmtPct(an, 0)} ${side}` : 'Historie: nog te weinig vergelijkbare momenten',
+      why: an != null ? `vergelijkbare momenten in de historie gingen maar ${fmtPct(an, 0)} van de keren ${side}` : 'er zijn nog te weinig vergelijkbare momenten in de historie' },
+    { ok: ok.flow, text: `Order flow en chart-signalen niet tegen ${side} (score ${fmtSigned(r.score, 2)})`, why: `kopers/verkopers en de chart wijzen de andere kant op dan ${side}` },
+    { ok: ok.sweep, text: ok.sweep ? 'Geen sweep tegen je richting in' : `Er was een sweep tegen ${side} in (zie Highs & lows)`, why: `de prijs schoot door een belangrijk niveau en kwam terug — een teken tegen ${side}` },
     { ok: ok.near, text: !ok.near ? `Minder dan $${nearOpenUsd(a)} van de price to beat — kan nog alle kanten op` : TF.src === 'binance' ? 'Afrekening op Binance: geen bronverschil' : `Ver genoeg van de price to beat (bron: ${a.spotSrc})` },
-    { ok: ok.time, text: ok.time ? 'Genoeg tijd om de order te plaatsen' : 'Minder dan 15 s over — order komt mogelijk niet meer door' },
-    { ok: ok.price, text: cost == null ? 'Polymarket-prijs onbekend — vul hem in bij "Polymarket vergelijking"' : `Prijs ${side} ${cents(cost)} ≤ max ${maxPrice > 0 ? cents(maxPrice) : '–'}` },
+    { ok: ok.time, text: ok.time ? 'Genoeg tijd om de order te plaatsen' : 'Minder dan 15 s over — order komt mogelijk niet meer door', why: 'er is te weinig tijd over om nog te kopen' },
+    { ok: ok.price, text: cost == null ? 'Polymarket-prijs onbekend — vul hem in bij "Polymarket vergelijking"' : `Prijs ${side} ${cents(cost)}${manualPrice(r.up ? 'up' : 'down') === cost && !(S.pm && S.pm.updated && Date.now() - S.pm.updated < 15000) ? ' (zelf ingevuld)' : ''} ≤ max ${maxPrice > 0 ? cents(maxPrice) : '–'}` },
   ];
   const res = { side, pHat, cost, maxPrice, checks, up: r.up };
   if (cost != null) {
@@ -2368,6 +2532,8 @@ function computeAdvice(a, now) {
     res.winReturn = eff < 1 ? (1 - eff) / eff : null;
     res.kelly = eff < 1 && pHat > eff ? clamp((pHat - eff) / (1 - eff) / 4, 0, 0.05) : 0;   // kwart-Kelly, max 5%
   }
+  // korte reden waarom het (nog) niet kan, voor bovenaan de pagina
+  for (const c of checks) if (!c.why) c.why = c.ok ? '' : c.text.charAt(0).toLowerCase() + c.text.slice(1);
   if (r.buy) return { ...res, state: r.up ? 'buy-up' : 'buy-down', head: `KOOP ${side}`, text: `Tot max ${cents(maxPrice)} per share.` };
   if (r.allButPrice && maxPrice > 0) return { ...res, state: 'almost', head: `${side} interessant — wacht op prijs`, text: `Koop alleen als ${side} ≤ ${cents(maxPrice)} kost${cost != null ? ` (nu ${cents(cost)})` : ''}.` };
   return { ...res, state: 'wait', head: 'WACHTEN', text: 'Nog niet alle voorwaarden voldaan — zie de controle hieronder.' };
@@ -2398,6 +2564,7 @@ function notifyBuy(a, adv) {
 
 // Eerste KOOP-signaal per venster vastleggen (blijft staan, ook na herladen)
 const SIM_KEY = 'btc.simbuys.v1';
+window.addEventListener('storage', e => { if (e.key === SIM_KEY) S.sim = null; });   // andere tab heeft iets gewijzigd
 function simLoad() { try { return JSON.parse(localStorage.getItem(SIM_KEY)) || {}; } catch { return {}; } }
 function simSave() {
   try {
@@ -2407,9 +2574,17 @@ function simSave() {
   } catch {}
 }
 function simCapture(a, adv, now) {
-  if (!adv.state.startsWith('buy')) return;
-  if (!S.sim) S.sim = simLoad();
   const key = `${TF.key}|${a.ws}`;
+  if (!S.sim) S.sim = simLoad();
+  const cur = S.sim[key];
+  // de price to beat kan na de aankoop nog preciezer worden (bijv. officiële waarde van Polymarket)
+  if (cur && a.op && (cur.open !== a.op.px || cur.feed !== a.op.feed) && FEED_RANK[a.op.feed] >= FEED_RANK[cur.feed]) {
+    S.sim = simLoad();
+    if (S.sim[key]) { S.sim[key].open = a.op.px; S.sim[key].feed = a.op.feed; simSave(); }
+    return;
+  }
+  if (cur || !adv.state.startsWith('buy') || a.stale) return;
+  S.sim = simLoad();                     // andere tabs kunnen intussen iets hebben opgeslagen
   if (S.sim[key]) return;
   S.sim[key] = { t: now, side: adv.side, price: adv.cost, pHat: adv.pHat, open: a.op.px, feed: a.op.feed, ws: a.ws };
   simSave();
@@ -2434,9 +2609,11 @@ function renderSimBox(a, now) {
   const prevWs = a.ws - WIN, prev = S.sim[`${TF.key}|${prevWs}`];
   let txt = '';
   if (prev) {
-    if (!prev.res) {
-      const out = windowOutcome(prevWs, prev.open, prev.feed, TF, now);
-      if (out) { prev.res = out.res; simSave(); }
+    if (!prev.res && now >= prevWs + WIN + 5000) {
+      // liefst dezelfde uitslag als het track record; anders zelf bepalen
+      const tr = S.track.find(e => e.ws === prevWs && (e.res === 'UP' || e.res === 'DOWN'));
+      const out = tr ? { res: tr.res } : windowOutcome(prevWs, prev.open, prev.feed, TF, now);
+      if (out) { S.sim = simLoad(); const k = `${TF.key}|${prevWs}`; if (S.sim[k]) { S.sim[k].res = out.res; simSave(); } prev.res = out.res; }
     }
     const won = prev.res && prev.res === prev.side;
     txt = `Vorig venster: ${prev.side} gekocht om ${new Date(prev.t).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })} voor ${cents(prev.price)} → ` +
@@ -2445,8 +2622,7 @@ function renderSimBox(a, now) {
   $('simPrev').textContent = txt;
 }
 
-function renderAdvice(a, now) {
-  const adv = computeAdvice(a, now);
+function renderAdvice(a, now, adv = computeAdvice(a, now)) {
   notifyBuy(a, adv);
   simCapture(a, adv, now);
   renderSimBox(a, now);
@@ -2458,13 +2634,14 @@ function renderAdvice(a, now) {
   $('checks').innerHTML = adv.checks.map(c => `<li><span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</span><span></span></li>`).join('');
   [...$('checks').children].forEach((li, i) => { li.lastChild.textContent = adv.checks[i].text; });
   const nums = $('adviceNums');
-  if (adv.pHat == null) { nums.textContent = '–'; return; }
+  if (adv.pHat == null) { nums.textContent = adv.noData ? adv.text : '–'; return; }
   const lines = [`Conservatieve slagingskans ${adv.side}: ${fmtPct(adv.pHat, 0)} · max prijs ${adv.maxPrice > 0 ? cents(adv.maxPrice) : '– (te onzeker)'}.`];
   if (adv.ev != null) {
     lines.push(`Bij ${cents(adv.cost)} + ${Math.round(S.cfg.fee * 100)}pt fee: ` +
       (adv.winReturn != null ? `winst als het goed gaat +${fmtPct(adv.winReturn, 0)}` : 'geen winst mogelijk, zelfs als het goed gaat') +
       `, verwachte waarde ${adv.ev >= 0 ? '+' : '−'}${fmtPct(Math.abs(adv.ev), 1)} per inzet.`);
-    lines.push(adv.kelly > 0 ? `Voorzichtige inzet: max ${fmtPct(adv.kelly, 1)} van je potje (kwart-Kelly).` : 'Inzet: niets — bij deze prijs is er geen voordeel.');
+    lines.push(!adv.state.startsWith('buy') ? 'Inzet: niets — er is nu geen koopsignaal.'
+      : adv.kelly > 0 ? `Voorzichtige inzet: max ${fmtPct(adv.kelly, 1)} van je potje (kwart-Kelly).` : 'Inzet: niets — bij deze prijs is er geen voordeel.');
   }
   nums.textContent = lines.join(' ');
 }
@@ -2522,7 +2699,7 @@ function recordSnap() {
   if (!pm.up || !pm.down || pm.up.ask == null || pm.down.ask == null) return;
   const x = liveAdviceInput(a, Date.now());
   const snap = {
-    tf: TF.key, ws: a.ws, t: Date.now(), el: Math.round((Date.now() - a.ws) / 1000),
+    tf: TF.key, ws: a.ws, t: Date.now(), el: Math.round((nowMs() - a.ws) / 1000),
     ua: pm.up.ask, ub: pm.up.bid, da: pm.down.ask, db: pm.down.bid,
     pu: +a.pSig.toFixed(4), ps: +a.pStat.toFixed(4), an: x.an == null ? null : +x.an.toFixed(4),
     sc: +a.sg.score.toFixed(3), sw: x.sw, no: x.no ? 1 : 0, op: a.op.px, of: a.op.feed, src: a.spotSrc,
@@ -2636,7 +2813,8 @@ function renderBacktest() {
   const row = (k, v, cls = '') => `<tr><td>${k}</td><td class="mono ${cls}">${v}</td></tr>`;
   $('btStats').innerHTML = m.n
     ? row('Trades (max 1 per venster)', m.n) +
-      row('Gewonnen', `${m.wins} (${fmtPct(m.wins / m.n, 0)})`, m.wins / m.n >= S.cfg.minP ? 'ok' : 'bad') +
+      (() => { const be = m.trades.reduce((s2, t) => s2 + t.price, 0) / m.n + S.cfg.fee;
+        return row('Gewonnen', `${m.wins} (${fmtPct(m.wins / m.n, 0)}; nodig om quitte te spelen: ${fmtPct(be, 0)})`, m.wins / m.n >= be ? 'ok' : 'bad'); })() +
       row('Totale winst bij $1 per trade', `${m.total >= 0 ? '+' : '−'}$${Math.abs(m.total).toFixed(2)}`, m.total >= 0 ? 'ok' : 'bad') +
       row('Rendement per trade', `${m.roi >= 0 ? '+' : '−'}${fmtPct(Math.abs(m.roi), 1)}`, m.roi >= 0 ? 'ok' : 'bad') +
       row('Grootste tussentijdse daling', `−$${m.dd.toFixed(2)}`) +
@@ -2752,7 +2930,6 @@ function onNewWindow(ws) {
   S.curWs = ws;
   S.manualPm = { up: null, down: null };
   $('pmUpIn').value = ''; $('pmDownIn').value = '';
-  if (S.hist.error) ensureHistory();          // mislukte historie opnieuw proberen
   if (!first) {
     $('openInput').value = '';
     rebuildSamples(); renderCalib(); renderEntry();
@@ -2762,28 +2939,30 @@ function onNewWindow(ws) {
 }
 
 function tick() {
-  const now = Date.now();
+  const now = nowMs();
   const ws = winStart(now);
   if (S.curWs !== ws) onNewWindow(ws);
   const a = analyze(now);
   S.last = a;
-  renderHero(a, now);
+  const adv = computeAdvice(a, now);
+  renderHero(a, now, adv);
   renderBreakdown(a);
   renderPM(a);
   renderFlow(a);
   renderIndicators(a);
   renderNext(a, now);
   renderLevels(a);
-  renderAdvice(a, now);
+  renderAdvice(a, now, adv);
   drawChart(a);
   trackTick(now, a);
 }
 
 function slowTick() {
-  const now = Date.now();
+  const now = nowMs();
   pruneTrades(now);
   const a = S.last;
   S.analog = a && a.z != null ? analogue(clamp(Math.round(WM - a.minsLeft), 0, WM - 1), a.z) : analogue(0, 0);
+  if (S.hist.error && !S.hist.loading && !S.hist.busy && Date.now() > (S.hist.retryAt || 0)) ensureHistory();
   resolveTrack(now);
   resolveRecordings(now);
   renderPatternsLive();
@@ -2799,8 +2978,9 @@ function wireUi() {
   $('openSet').onclick = setOpen;
   $('openInput').addEventListener('keydown', e => { if (e.key === 'Enter') setOpen(); });
   $('openReset').onclick = () => { delete S.manualOpen[winStart(Date.now())]; $('openInput').value = ''; };
-  $('pmUpIn').addEventListener('input', e => { S.manualPm.up = parseCents(e.target.value); });
-  $('pmDownIn').addEventListener('input', e => { S.manualPm.down = parseCents(e.target.value); });
+  const setManual = side => e => { const v = parseCents(e.target.value); S.manualPm[side] = v == null ? null : { v, t: Date.now() }; };
+  $('pmUpIn').addEventListener('input', setManual('up'));
+  $('pmDownIn').addEventListener('input', setManual('down'));
   $('trackClear').onclick = () => { if (confirm('Track record in deze browser wissen?')) { S.track = []; trSave(); renderTrack(); $('trackSum').textContent = 'Gewist.'; } };
   // tijdsframe-tabs
   for (const b of $('tfTabs').children) b.onclick = () => setTF(b.dataset.tf);
@@ -2858,6 +3038,7 @@ async function init() {
   setTF(tf || '15m', true);
   wireUi();
   setConn('warn', 'Data laden…');
+  tick();                                   // venster en aftelling meteen tonen
   if (await refreshKlines(400)) setConn('warn', 'Verbinden met live stream…');
   connectWs();
   connectCoinbase();
@@ -2867,7 +3048,11 @@ async function init() {
   // Een worker als klok: browsers vertragen gewone timers sterk in een achtergrondtab,
   // een worker niet — zo blijven opnames en meldingen doorlopen.
   let beat = 0;
+  let lastBeat = Date.now();
   const onBeat = () => {
+    // grote sprong in de tijd = de computer sliep of de tab was bevroren: alles opnieuw ophalen
+    if (Date.now() - lastBeat > 20000) resync();
+    lastBeat = Date.now();
     beat++;
     tick();
     if (beat % 4 === 0) slowTick();
@@ -2880,6 +3065,8 @@ async function init() {
   } catch {
     setInterval(onBeat, 500);
   }
+  window.addEventListener('online', () => resync());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - S.lastMsg > 20000) resync(); });
   ensureHistory();
 }
 
